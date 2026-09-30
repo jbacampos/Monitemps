@@ -1,0 +1,119 @@
+<div class="card">
+    <section class="section vento">
+        <div class="section-title">VENTO</div>
+        <div class="wind-speed">
+            <span id="windSpeed">--.-</span>
+            <span class="unit">km/h</span>
+        </div>
+
+        <div class="wind-details">
+            <div class="wind-item">
+                <div class="item-label">Rajada</div>
+                <div class="item-value">
+                    <span id="windGust">--.-</span>
+                    <span class="item-unit">km/h</span>
+                </div>
+            </div>
+
+            <div class="wind-item">
+                <div class="item-label">Direção</div>
+                <div class="item-value direction">
+                    <span id="windDirection">---</span>
+                    <span id="windDegrees" class="degrees"></span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section chuva">
+        <div class="section-title">CHUVA</div>
+
+        <div class="rain-grid">
+            <div class="rain-item">
+                <div class="item-label">Atual</div>
+                <div class="item-value"><span id="rainRate">--.-</span> <span class="item-unit">mm/h</span></div>
+            </div>
+            <div class="rain-item">
+                <div class="item-label">1 hora</div>
+                <div class="item-value"><span id="rainHour">--.-</span> <span class="item-unit">mm</span></div>
+            </div>
+            <div class="rain-item">
+                <div class="item-label">Hoje</div>
+                <div class="item-value"><span id="rainDay">--.-</span> <span class="item-unit">mm</span></div>
+            </div>
+            <div class="rain-item">
+                <div class="item-label">Semana</div>
+                <div class="item-value"><span id="rainWeek">---</span> <span class="item-unit">mm</span></div>
+            </div>
+            <div class="rain-item">
+                <div class="item-label">Mês</div>
+                <div class="item-value"><span id="rainMonth">---</span> <span class="item-unit">mm</span></div>
+            </div>
+            <div class="rain-item">
+                <div class="item-label">Ano</div>
+                <div class="item-value"><span id="rainYear">---</span> <span class="item-unit">mm</span></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section astronomia">
+        <div class="section-title">SOL E LUA</div>
+
+        <div class="astro-row">
+            <div class="astro-icon sun-icon">☀</div>
+            <div class="astro-name">Sol</div>
+            <div class="astro-rise">↑ <span id="sunrise">--:--</span></div>
+            <div class="astro-set"><span id="sunset">--:--</span> ↓</div>
+        </div>
+
+        <div class="astro-row">
+            <div id="moonIcon" class="astro-icon moon-icon">🌑</div>
+            <div class="astro-name">Lua</div>
+            <div class="astro-rise">↑ <span id="moonrise">--:--</span></div>
+            <div class="astro-set"><span id="moonset">--:--</span> ↓</div>
+        </div>
+
+        <div class="moon-info">
+            <div class="moon-phase-row">
+                <div class="moon-phase-content">
+                    <span id="moonPhaseName">Lua Nova</span>
+                    <span class="moon-phase-separator">-</span>
+                    <span id="moonAge">--,(dias)</span>
+                </div>
+            </div>
+
+            <div class="moon-events">
+                <div id="nextFullMoon" class="moon-event">
+                    <span class="moon-event-label">Lua cheia</span>
+                    <span class="moon-event-icon">🌕</span>
+                    <span class="moon-event-date">em --/-- (---)</span>
+                </div>
+            
+                <div id="nextNewMoon" class="moon-event">
+                    <span class="moon-event-label">Lua nova</span>
+                    <span class="moon-event-icon">🌑</span>
+                    <span class="moon-event-date">em --/-- (---)</span>
+                </div>
+            </div>
+
+
+        </div>
+    </section>
+
+    <div class="last-update-row">
+        <div id="lastUpdate" class="last-update">Dados: --/--- --:--</div>
+        <button id="refreshButton" class="refresh-button" title="Atualizar">↻</button>
+    </div>
+
+    <div id="helpOverlay" class="help-overlay" hidden>
+        <div class="help-box">
+            <button id="helpClose" class="help-close" title="Fechar">×</button>
+            <div class="help-title">Siglas</div>
+            <div class="help-list">
+                <div class="help-item"><span>RV</span><span>Rajada de Vento</span></div>
+                <div class="help-item"><span>DM10</span><span>Direção média do vento em 10 minutos</span></div>
+                <div class="help-item"><span>mm/h</span><span>Taxa de chuva</span></div>
+            </div>
+        </div>
+    </div>
+</div>

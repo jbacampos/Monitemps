@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoniTemps — preview local</title>
+<style>
+html,body{margin:0;min-height:100%;background:#202328;color:#eee;font-family:Inter,Arial,sans-serif}
+body{padding:20px;box-sizing:border-box}.preview-header{margin:0 0 10px;font-size:13px;color:#c8ccd1}
+#widget{width:min(100%,560px);height:710px;margin:auto}
+</style>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="preview-header">MoniTemps — preview local (dados simulados)</div>
+<div id="widget"></div>
+<script>
+const container = document.getElementById('widget');
+window.container = container;
+const fixedTs = Date.parse('2026-09-30T12:14:00-03:00');
+const telemetry = {
+  wind_speed:{timestamp:fixedTs,value:'15.8'}, wind_gust:{timestamp:fixedTs,value:'24.5'}, wind_direction_10min:{timestamp:fixedTs,value:'201'},
+  rain_rate:{timestamp:fixedTs,value:'0.0'}, rain_hour:{timestamp:fixedTs,value:'0.0'}, rain_day:{timestamp:fixedTs,value:'0.0'},
+  rain_week:{timestamp:fixedTs,value:'37'}, rain_month:{timestamp:fixedTs,value:'37'}, rain_year:{timestamp:fixedTs,value:'37'}
+};
+const phaseData=[
+ {phase:'New Moon',year:2026,month:9,day:11,time:'08:00'},
+ {phase:'First Quarter',year:2026,month:9,day:18,time:'23:00'},
+ {phase:'Full Moon',year:2026,month:9,day:26,time:'19:49'},
+ {phase:'Last Quarter',year:2026,month:10,day:2,time:'18:00'},
+ {phase:'New Moon',year:2026,month:10,day:10,time:'18:00'},
+ {phase:'First Quarter',year:2026,month:10,day:18,time:'16:00'},
+ {phase:'Full Moon',year:2026,month:10,day:26,time:'07:00'}
+];
+const httpGet=(url)=>({subscribe:(ok,err)=>{
+  if(url.includes('/moon/phases/')) ok({phasedata:phaseData});
+  else ok({properties:{data:{sundata:[{phen:'Rise',time:'06:06'},{phen:'Set',time:'18:27'}],moondata:[{phen:'Rise',time:'23:03'},{phen:'Set',time:'08:18'}]}}});
+}});
+const ctx={http:{get:httpGet},subscriptionApi:{createSubscription:(options)=>({subscribe:(fn)=>{
+  const data=Object.entries(telemetry).map(([name,v])=>({dataKey:{name},datasource:{entityFilter:{singleEntity:{id:'63eaff60-b030-11f1-940d-1f4ee055f09a'}}},data:[[v.timestamp,v.value]]}));
+  const subscription={data};
+  if (options && options.callbacks && typeof options.callbacks.onDataUpdated === 'function') {
+    options.callbacks.onDataUpdated(subscription);
+  }
+  fn(subscription);
+  return {unsubscribe(){}};
+}})}};
+const widget=document.getElementById('widget');
+fetch('index.html').then(r=>r.text()).then(html=>{widget.innerHTML=html; const s=document.createElement('script'); s.src='script.js'; document.body.appendChild(s);});
+</script>
+</body>
+</html>
