@@ -149,7 +149,7 @@
     width: 430px;
     max-width: 100%;
     margin: 0 auto;
-    padding-left: 138px;
+    padding-left: 163px;
     box-sizing: border-box;
 
     display: flex;
@@ -157,7 +157,7 @@
     justify-content: flex-start;
 
     min-height: 22px;
-    margin-top: 1px;
+    margin-top: -11px;
     font-size: 15px;
     line-height: 20px;
     color: #eeeeee;
@@ -178,7 +178,7 @@
     width: 430px;
     max-width: 100%;
     margin: 2px auto 0;
-    padding-left: 138px;
+    padding-left: 163px;
     box-sizing: border-box;
 
     display: flex;
@@ -197,7 +197,7 @@
 
 
 .moon-event > span:first-child { grid-column: 1; }
-.moon-event-icon { grid-column: 2; width: 20px; text-align: center; }
+.moon-event-icon { grid-column: 2; width: 20px; text-align: center; position: relative; top: -0.5px; }
 .moon-event > span:last-child { grid-column: 3; }
 
 /* RODAPÉ */
@@ -310,10 +310,13 @@
         min-height: 34px;
         font-size: 14px;
         line-height: 18px;
+        padding-left: 119px;
+        margin-top: -6px;
     }
 
     .moon-events {
         grid-template-columns: 28px 55px 1fr 1fr;
+        padding-left: 119px;
     }
 
     .moon-event {
@@ -356,4 +359,7 @@
     .astro-rise, .astro-set { font-size: 15px; }
     .moon-phase-row { grid-template-columns: 25px 48px 1fr 1fr; }
     .moon-event { grid-template-columns: 68px 20px 1fr; }
+
+    .moon-phase-row,
+    .moon-events { padding-left: 102px; }
 }
