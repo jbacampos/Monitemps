@@ -263,8 +263,8 @@
     text-align: center;
     font-family: Arial, sans-serif;
 }
-.help-button { color: #ff2855; font-size: 24px; font-weight: 700; line-height: 28px; }
-.help-button:hover { color: #ff5275; }
+.help-button { color: #aeb4bb; font-size: 23px; font-weight: 400; line-height: 28px; }
+.help-button:hover { color: #eeeeee; }
 .refresh-button { grid-column: 3; color: #aeb4bb; font-size: 23px; font-weight: 400; line-height: 28px; }
 .refresh-button:hover { color: #eeeeee; }
 
@@ -297,9 +297,11 @@
 .help-close { position: absolute; top: 5px; right: 8px; width: 26px; height: 26px; padding: 0; border: none; background: transparent; color: #bfc3c8; font-family: Arial, sans-serif; font-size: 24px; font-weight: 300; line-height: 24px; cursor: pointer; }
 .help-close:hover { color: #ffffff; }
 .help-list { display: flex; flex-direction: column; gap: 7px; }
-.help-item { display: grid; grid-template-columns: 50px 1fr; column-gap: 8px; align-items: baseline; font-size: 13px; line-height: 17px; }
-.help-item span:first-child { color: #eeeeee; font-weight: 600; }
-.help-item span:last-child { color: #c8ccd1; font-weight: 400; }
+.help-list + .help-list { margin-top: 14px; }
+.help-text { font-size: 13px; line-height: 17px; color: #c8ccd1; }
+.help-text strong { color: #eeeeee; }
+.help-item { font-size: 13px; line-height: 17px; }
+.help-item span { color: #c8ccd1; font-weight: 400; }
 
 /* ============================================================
    MOBILE — MESMO PADRÃO DO PRIMEIRO WIDGET

@@ -113,6 +113,7 @@
     </section>
 
     <div class="last-update-row">
+        <button id="helpButton" class="help-button" title="Ajuda">ⓘ</button>
         <div id="lastUpdate" class="last-update">Dados: --/--- --:--</div>
         <button id="refreshButton" class="refresh-button" title="Atualizar">↻</button>
     </div>
@@ -120,11 +121,25 @@
     <div id="helpOverlay" class="help-overlay" hidden>
         <div class="help-box">
             <button id="helpClose" class="help-close" title="Fechar">×</button>
-            <div class="help-title">Siglas</div>
+            <div class="help-title">LUA</div>
             <div class="help-list">
-                <div class="help-item"><span>RV</span><span>Rajada de Vento</span></div>
-                <div class="help-item"><span>DM10</span><span>Direção média do vento em 10 minutos</span></div>
-                <div class="help-item"><span>mm/h</span><span>Taxa de chuva</span></div>
+                <div class="help-text">
+                    <strong>Fase da Lua:</strong> indica a aparência da Lua vista da Terra, conforme a parte iluminada pelo Sol.
+                </div>
+                <div class="help-text">
+                    <strong>Idade da Lua:</strong> número de dias desde a última Lua Nova. Um ciclo lunar completo dura aproximadamente 29,5 dias.
+                </div>
+            </div>
+            <div class="help-list">
+                <div class="help-item">🌑 Lua nova <span>— 0,0 dias</span></div>
+                <div class="help-item">🌒 Crescente <span>— 3,7 dias</span></div>
+                <div class="help-item">🌓 Quarto crescente <span>— 7,4 dias</span></div>
+                <div class="help-item">🌔 Crescente gibosa <span>— 11,1 dias</span></div>
+                <div class="help-item">🌕 Lua cheia <span>— 14,8 dias</span></div>
+                <div class="help-item">🌖 Minguante gibosa <span>— 18,5 dias</span></div>
+                <div class="help-item">🌗 Quarto minguante <span>— 22,1 dias</span></div>
+                <div class="help-item">🌘 Minguante <span>— 25,8 dias</span></div>
+                <div class="help-item">🌑 Lua nova <span>— 29,5 dias</span></div>
             </div>
         </div>
     </div>
