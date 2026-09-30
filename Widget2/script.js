@@ -68,6 +68,7 @@ let astronomyDateKey = null;
 let astronomyRequestInProgress = false;
 let moonPhaseDateKey = null;
 let moonPhaseRequestInProgress = false;
+let moonPhaseLastPhases = null;
 
 
 // ============================================================
@@ -1268,6 +1269,8 @@ function updateMoonPhaseDisplay(phases) {
         return;
     }
 
+    moonPhaseLastPhases = phases;
+
     const now = new Date();
 
     const events =
@@ -1412,6 +1415,59 @@ function updateMoonPhaseDisplay(phases) {
             }
         }
     }
+
+
+    // ========================================================
+    // ORDEM CRONOLÓGICA DOS DOIS EVENTOS
+    // --------------------------------------------------------
+    // O evento com a data mais próxima aparece primeiro. Apenas
+    // move os elementos já existentes na lista, sem alterar
+    // conteúdo, IDs ou classes.
+    // ========================================================
+
+    const moonEventsList =
+        container.querySelector(".moon-events");
+
+    const fullMoonEvent =
+        container.querySelector("#nextFullMoon");
+
+    const newMoonEvent =
+        container.querySelector("#nextNewMoon");
+
+    if (moonEventsList && fullMoonEvent && newMoonEvent) {
+
+        let firstEvent = null;
+        let secondEvent = null;
+
+        if (nextFull && nextNew) {
+
+            if (
+                nextFull.date.getTime() <=
+                nextNew.date.getTime()
+            ) {
+                firstEvent = fullMoonEvent;
+                secondEvent = newMoonEvent;
+            } else {
+                firstEvent = newMoonEvent;
+                secondEvent = fullMoonEvent;
+            }
+
+        } else if (nextNew) {
+
+            firstEvent = newMoonEvent;
+            secondEvent = fullMoonEvent;
+
+        } else if (nextFull) {
+
+            firstEvent = fullMoonEvent;
+            secondEvent = newMoonEvent;
+        }
+
+        if (firstEvent && secondEvent) {
+            moonEventsList.appendChild(firstEvent);
+            moonEventsList.appendChild(secondEvent);
+        }
+    }
 }
 
 function updateMoonPhasesFromUSNO() {
@@ -1487,6 +1543,10 @@ function updateAstronomy() {
     updateAstronomyLocalFallback();
     updateAstronomyFromUSNO();
     updateMoonPhasesFromUSNO();
+
+    if (moonPhaseLastPhases) {
+        updateMoonPhaseDisplay(moonPhaseLastPhases);
+    }
 }
 
 // ============================================================
