@@ -1538,11 +1538,272 @@ function updateMoonPhasesFromUSNO() {
 }
 
 
+// ============================================================
+// ESTAÇÕES DO ANO — HEMISFÉRIO SUL
+// ------------------------------------------------------------
+// Fonte: USNO (seasons). O serviço devolve equinócios e
+// solstícios já no fuso do sítio (parâmetro tz), portanto
+// pode-se reutilizar siteLocalTimeToDate().
+// ============================================================
+
+const USNO_SEASONS_API =
+    "https://aa.usno.navy.mil/api/seasons";
+
+// Equinócios e solstícios vistos do hemisfério Sul.
+const SOUTH_SEASONS = {
+    3: { name: "Outono", icon: "🍁" },
+    6: { name: "Inverno", icon: "❄️" },
+    9: { name: "Primavera", icon: "🌸" },
+    12: { name: "Verão", icon: "☀️" }
+};
+
+let seasonEventsByYear = {};
+let seasonRequestedYears = {};
+let seasonPendingYears = {};
+
+
+function parseUSNOSeasonEvent(item) {
+
+    if (!item || typeof item !== "object") {
+        return null;
+    }
+
+    const phenom =
+        String(item.phenom || "").trim().toLowerCase();
+
+    if (
+        phenom !== "equinox" &&
+        phenom !== "solstice"
+    ) {
+        return null;
+    }
+
+    const month = Number(item.month);
+    const year = Number(item.year);
+    const day = Number(item.day);
+
+    const season = SOUTH_SEASONS[month];
+
+    const match =
+        String(item.time || "").match(/^(\d{1,2}):(\d{2})/);
+
+    if (
+        !season ||
+        !match ||
+        !Number.isFinite(year) ||
+        !Number.isFinite(day)
+    ) {
+        return null;
+    }
+
+    return {
+        name: season.name,
+        icon: season.icon,
+        date: siteLocalTimeToDate(
+            year,
+            month,
+            day,
+            Number(match[1]),
+            Number(match[2])
+        )
+    };
+}
+
+
+function formatSeasonDate(date) {
+
+    if (
+        !(date instanceof Date) ||
+        Number.isNaN(date.getTime())
+    ) {
+        return "--/--- (---)";
+    }
+
+    const local =
+        new Date(
+            date.getTime() +
+            SITE_TIMEZONE_OFFSET_MINUTES * 60000
+        );
+
+    const months = [
+        "jan", "fev", "mar", "abr",
+        "mai", "jun", "jul", "ago",
+        "set", "out", "nov", "dez"
+    ];
+
+    const weekdays = [
+        "dom", "seg", "ter", "qua",
+        "qui", "sex", "sáb"
+    ];
+
+    return (
+        String(local.getUTCDate()).padStart(2, "0") +
+        "/" +
+        months[local.getUTCMonth()] +
+        " (" +
+        weekdays[local.getUTCDay()] +
+        ")"
+    );
+}
+
+function updateSeasonDisplay() {
+
+    const year =
+        getSiteDateParts().year;
+
+    const events =
+        (seasonEventsByYear[year - 1] || [])
+            .concat(seasonEventsByYear[year] || [])
+            .concat(seasonEventsByYear[year + 1] || []);
+
+    if (!events.length) {
+        return;
+    }
+
+    const sorted =
+        events
+            .slice()
+            .sort((a, b) => a.date - b.date);
+
+    const now =
+        new Date();
+
+    const previous =
+        sorted.filter(
+            item => item.date.getTime() <= now.getTime()
+        );
+
+    const current =
+        previous[previous.length - 1];
+
+    const next =
+        sorted.filter(
+            item => item.date.getTime() > now.getTime()
+        )[0];
+
+    const nowIcon =
+        container.querySelector("#seasonNowIcon");
+
+    const nowName =
+        container.querySelector("#seasonNowName");
+
+    const nextIcon =
+        container.querySelector("#seasonNextIcon");
+
+    const nextText =
+        container.querySelector("#seasonNextText");
+
+    if (nowIcon && current) {
+        nowIcon.textContent = current.icon;
+    }
+
+    if (nowName && current) {
+        nowName.textContent = current.name;
+    }
+
+    if (nextIcon && next) {
+        nextIcon.textContent = next.icon;
+    }
+
+    if (nextText && next) {
+        nextText.textContent =
+            next.name +
+            " em " +
+            formatSeasonDate(next.date);
+    }
+}
+
+
+function requestSeasonYear(year) {
+
+    if (
+        seasonRequestedYears[year] ||
+        seasonPendingYears[year]
+    ) {
+        return;
+    }
+
+    seasonPendingYears[year] = true;
+
+    const url =
+        USNO_SEASONS_API +
+        "?year=" + year +
+        "&tz=" +
+        (SITE_TIMEZONE_OFFSET_MINUTES / 60);
+
+    ctx.http.get(url).subscribe(
+
+        response => {
+
+            try {
+
+                const data =
+                    response && Array.isArray(response.data)
+                        ? response.data
+                        : [];
+
+                const events =
+                    data
+                        .map(item => parseUSNOSeasonEvent(item))
+                        .filter(Boolean);
+
+                if (events.length) {
+                    seasonEventsByYear[year] = events;
+                    seasonRequestedYears[year] = true;
+                    updateSeasonDisplay();
+                }
+
+            } catch (error) {
+
+                console.error(
+                    "Erro ao interpretar estações:",
+                    error
+                );
+            }
+
+            seasonPendingYears[year] = false;
+        },
+
+        error => {
+
+            console.warn(
+                "USNO indisponível para estações.",
+                error
+            );
+
+            seasonPendingYears[year] = false;
+        }
+    );
+}
+
+
+function updateSeasonsFromUSNO() {
+
+    const parts =
+        getSiteDateParts();
+
+    requestSeasonYear(parts.year);
+
+    // Em janeiro/início de ano a estação atual começou no ano anterior.
+    if (parts.month <= 3) {
+        requestSeasonYear(parts.year - 1);
+    }
+
+    // Depois do solstício de dezembro a próxima estação é do ano seguinte.
+    if (parts.month === 12) {
+        requestSeasonYear(parts.year + 1);
+    }
+
+    updateSeasonDisplay();
+}
+
+
 function updateAstronomy() {
 
     updateAstronomyLocalFallback();
     updateAstronomyFromUSNO();
     updateMoonPhasesFromUSNO();
+    updateSeasonsFromUSNO();
 
     if (moonPhaseLastPhases) {
         updateMoonPhaseDisplay(moonPhaseLastPhases);

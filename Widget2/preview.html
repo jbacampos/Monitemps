@@ -32,8 +32,18 @@ const phaseData=[
  {phase:'First Quarter',year:2026,month:10,day:18,time:'16:00'},
  {phase:'Full Moon',year:2026,month:10,day:26,time:'07:00'}
 ];
+const seasonTable={
+ 2025:[[1,4,'10:28','Perihelion'],[3,20,'06:01','Equinox'],[6,20,'23:42','Solstice'],[7,3,'16:55','Aphelion'],[9,22,'15:19','Equinox'],[12,21,'12:03','Solstice']],
+ 2026:[[1,3,'14:15','Perihelion'],[3,20,'11:46','Equinox'],[6,21,'05:24','Solstice'],[7,6,'14:30','Aphelion'],[9,22,'21:05','Equinox'],[12,21,'17:50','Solstice']],
+ 2027:[[1,2,'23:33','Perihelion'],[3,20,'17:25','Equinox'],[6,21,'11:11','Solstice'],[7,5,'02:06','Aphelion'],[9,23,'03:02','Equinox'],[12,21,'23:42','Solstice']]
+};
+const seasonMock=(year)=>{
+  const rows=seasonTable[year]||[];
+  return {apiversion:'4.0.1',dst:false,tz:-3,year:year,data:rows.map(r=>({phenom:r[3],day:r[1],month:r[0],time:r[2],year:year}))};
+};
 const httpGet=(url)=>({subscribe:(ok,err)=>{
-  if(url.includes('/moon/phases/')) ok({phasedata:phaseData});
+  if(url.includes('/seasons')){const y=Number((url.match(/year=(\d+)/)||[])[1]);ok(seasonMock(y));}
+  else if(url.includes('/moon/phases/')) ok({phasedata:phaseData});
   else ok({properties:{data:{sundata:[{phen:'Rise',time:'06:06'},{phen:'Set',time:'18:27'}],moondata:[{phen:'Rise',time:'23:03'},{phen:'Set',time:'08:18'}]}}});
 }});
 const ctx={http:{get:httpGet},subscriptionApi:{createSubscription:(options)=>({subscribe:(fn)=>{
