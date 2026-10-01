@@ -160,10 +160,10 @@
     align-items: baseline;
     justify-content: flex-start;
 
-    min-height: 22px;
-    margin-top: -11px;
+    min-height: 18px;
+    margin-top: -3px;
     font-size: 15px;
-    line-height: 20px;
+    line-height: 18px;
     color: #eeeeee;
     white-space: nowrap;
 }
@@ -181,15 +181,16 @@
 .moon-events {
     width: 430px;
     max-width: 100%;
-    margin: 2px auto 0;
+    margin: 3px auto 0;
     padding-left: 163px;
     box-sizing: border-box;
 
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    /* 5px = 23px (vão fase->1ª linha) - 18px (line-height) */
-    gap: 5px;
+    /* Mesmo valor do margin-top de .moon-events, para as três linhas
+       (fase, próxima cheia e próxima nova) ficarem igualmente espaçadas. */
+    gap: 3px;
 }
 
 .moon-event {
@@ -211,9 +212,8 @@
 /* ESTAÇÕES */
 
 .season-row {
-    /* 28px = 47px (vão Sol->Lua, topo a topo) - 18px (altura da linha da Lua)
-       - 1px (posição do texto dentro da linha) */
-    margin: 28px auto 0;
+    /* Compensa a altura de .moon-info (mantém a estação na mesma posição) */
+    margin: 25px auto 0;
     font-size: 15px;
     line-height: 20px;
     color: #eeeeee;
