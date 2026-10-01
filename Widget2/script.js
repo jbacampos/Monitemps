@@ -12,11 +12,15 @@ const SITE_LONGITUDE = -51.585233;
 // O Sítio opera em UTC-3.
 const SITE_TIMEZONE_OFFSET_MINUTES = -180;
 
-// Horizonte de nascer/pôr da Lua na convenção da USNO: bordo superior
-// aparente, considerando refração (~0,57°) e semidiâmetro (~0,26°).
-// Como moonAltitudeFallback devolve a altitude topocêntrica, o limiar
+// Horizonte de nascer/pôr da Lua: bordo superior aparente,
+// considerando refração (~0,57°) e semidiâmetro (~0,26°). Como
+// moonAltitudeFallback devolve a altitude topocêntrica, o limiar
 // corresponde a -(refração + semidiâmetro).
 const MOON_RISE_SET_HORIZON = -0.825;
+
+// Horizonte de nascer/pôr do Sol: bordo superior aparente
+// (refração ~0,57° + semidiâmetro ~0,27°) → -0,833°.
+const SUN_RISE_SET_HORIZON = -0.833;
 
 let lastUpdateTimestamp = null;
 
@@ -78,27 +82,9 @@ function windDirectionName(deg) {
 // ============================================================
 // ASTRONOMIA
 // ------------------------------------------------------------
-// Fonte primária: USNO Astronomical Applications Department.
-//
-// O USNO calcula nascer/pôr do Sol e da Lua para a coordenada
-// e a data local informadas. O resultado é mostrado ao minuto.
-// O cálculo local abaixo é apenas fallback caso o serviço
-// externo não esteja disponível.
+// Todos os dados astronômicos (Sol, Lua, fases e estações) são
+// calculados localmente, sem dependência de serviços externos.
 // ============================================================
-
-const USNO_API_BASE =
-    "https://aa.usno.navy.mil/api/rstt/oneday";
-
-const USNO_MOON_PHASES_API =
-    "https://aa.usno.navy.mil/api/moon/phases/date";
-
-let astronomyDateKey = null;
-let astronomyRequestInProgress = false;
-let astronomyUsnoMoonrise = null;
-let astronomyUsnoMoonset = null;
-let moonPhaseDateKey = null;
-let moonPhaseRequestInProgress = false;
-let moonPhaseLastPhases = null;
 
 
 // ============================================================
@@ -131,21 +117,6 @@ function getSiteDateParts() {
         day:
             d.getUTCDate()
     };
-}
-
-
-function getSiteDateKey() {
-
-    const p =
-        getSiteDateParts();
-
-    return (
-        String(p.year).padStart(4, "0") +
-        "-" +
-        String(p.month).padStart(2, "0") +
-        "-" +
-        String(p.day).padStart(2, "0")
-    );
 }
 
 
@@ -217,9 +188,12 @@ function formatSiteTime(date) {
         return "--:--";
     }
 
+    // Arredonda ao minuto mais próximo; o instante calculado é
+    // fracionário.
     const local =
         new Date(
             date.getTime() +
+            30000 +
             SITE_TIMEZONE_OFFSET_MINUTES *
             60000
         );
@@ -244,147 +218,160 @@ function formatSiteTime(date) {
 
 
 // ============================================================
-// CONVERTE "HH:MM" DO USNO
-// ============================================================
-
-function parseUSNOTime(
-    text,
-    year,
-    month,
-    day
-) {
-
-    if (
-        typeof text !== "string"
-    ) {
-        return null;
-    }
-
-    const match =
-        text.match(
-            /^(\d{1,2}):(\d{2})/
-        );
-
-    if (!match) {
-        return null;
-    }
-
-    const hour =
-        Number(match[1]);
-
-    const minute =
-        Number(match[2]);
-
-    if (
-        hour > 23 ||
-        minute > 59
-    ) {
-        return null;
-    }
-
-    return siteLocalTimeToDate(
-        year,
-        month,
-        day,
-        hour,
-        minute
-    );
-}
-
-
-// ============================================================
-// PROCURA UM EVENTO NAS LISTAS DO USNO
-// ============================================================
-
-function findUSNOEvent(
-    list,
-    names,
-    year,
-    month,
-    day
-) {
-
-    if (!Array.isArray(list)) {
-        return null;
-    }
-
-    for (
-        const item of list
-    ) {
-
-        if (
-            !item ||
-            typeof item !== "object"
-        ) {
-            continue;
-        }
-
-        const phen =
-            String(
-                item.phen || ""
-            ).trim().toLowerCase();
-
-        if (
-            !names.some(
-                n =>
-                    phen ===
-                    String(n).toLowerCase()
-            )
-        ) {
-            continue;
-        }
-
-        const result =
-            parseUSNOTime(
-                item.time,
-                year,
-                month,
-                day
-            );
-
-        if (result) {
-            return result;
-        }
-    }
-
-    return null;
-}
-
-
-// ============================================================
-// SOL — FALLBACK LOCAL
+// SOL — CÁLCULO LOCAL
 // ------------------------------------------------------------
-// Fórmulas NOAA.
+// Posição do Sol (Schlyter) + altitude, com o nascer/pôr
+// resolvidos por bisseção no instante exato de cada evento.
 // ============================================================
 
-function dayOfYear(
-    year,
-    month,
-    day
+function sunPositionFallback(
+    jd
 ) {
 
-    const start =
-        Date.UTC(
-            year,
-            0,
-            1
+    const d =
+        jd - 2451543.5;
+
+    const w =
+        282.9404 +
+        4.70935e-5 * d;
+
+    const e =
+        0.016709 -
+        1.151e-9 * d;
+
+    const M =
+        normalize360(
+            356.0470 +
+            0.9856002585 * d
         );
 
-    const current =
-        Date.UTC(
-            year,
-            month - 1,
-            day
+    const Mr =
+        M *
+        Math.PI /
+        180;
+
+    const E =
+        Mr +
+        e *
+        Math.sin(Mr) *
+        (1 + e * Math.cos(Mr));
+
+    const xv =
+        Math.cos(E) - e;
+
+    const yv =
+        Math.sqrt(1 - e * e) *
+        Math.sin(E);
+
+    const v =
+        Math.atan2(yv, xv);
+
+    const r =
+        Math.sqrt(xv * xv + yv * yv);
+
+    const lon =
+        normalize360(
+            v * 180 / Math.PI + w
         );
+
+    const lonRad =
+        lon *
+        Math.PI /
+        180;
+
+    const xs =
+        r * Math.cos(lonRad);
+
+    const ys =
+        r * Math.sin(lonRad);
+
+    const obliquity =
+        23.4393 *
+        Math.PI /
+        180;
+
+    const ye =
+        ys * Math.cos(obliquity);
+
+    const ze =
+        ys * Math.sin(obliquity);
+
+    return {
+
+        ra:
+            normalize360(
+                Math.atan2(ye, xs) *
+                180 /
+                Math.PI
+            ),
+
+        dec:
+            Math.atan2(
+                ze,
+                Math.sqrt(xs * xs + ye * ye)
+            ) *
+            180 /
+            Math.PI,
+
+        eclipticLongitude:
+            lon,
+
+        distance:
+            r
+    };
+}
+
+
+function sunAltitudeFallback(date) {
+
+    const sun =
+        sunPositionFallback(
+            julianDay(date)
+        );
+
+    const lat =
+        SITE_LATITUDE *
+        Math.PI /
+        180;
+
+    const dec =
+        sun.dec *
+        Math.PI /
+        180;
+
+    let ha =
+        greenwichSiderealTime(
+            julianDay(date)
+        )
+        +
+        SITE_LONGITUDE
+        -
+        sun.ra;
+
+    ha =
+        normalize360(ha);
+
+    if (ha > 180) {
+        ha -= 360;
+    }
+
+    const haRad =
+        ha *
+        Math.PI /
+        180;
 
     return (
-        Math.floor(
-            (
-                current -
-                start
-            ) / 86400000
-        )
-    ) + 1;
+        Math.asin(
+            Math.sin(lat) *
+            Math.sin(dec)
+            +
+            Math.cos(lat) *
+            Math.cos(dec) *
+            Math.cos(haRad)
+        ) *
+        180 /
+        Math.PI
+    );
 }
 
 
@@ -393,143 +380,101 @@ function calculateSunTimesFallback() {
     const p =
         getSiteDateParts();
 
-    const n =
-        dayOfYear(
+    const start =
+        siteLocalTimeToDate(
             p.year,
             p.month,
-            p.day
+            p.day,
+            0,
+            0
         );
 
-    const gamma =
-        2 *
-        Math.PI /
-        365 *
-        (n - 1);
-
-    const equationOfTime =
-        229.18 *
-        (
-            0.000075
-            +
-            0.001868 *
-            Math.cos(gamma)
-            -
-            0.032077 *
-            Math.sin(gamma)
-            -
-            0.014615 *
-            Math.cos(
-                2 * gamma
-            )
-            -
-            0.040849 *
-            Math.sin(
-                2 * gamma
-            )
+    const end =
+        siteLocalTimeToDate(
+            p.year,
+            p.month,
+            p.day,
+            0,
+            1440
         );
 
-    const declination =
-        0.006918
-        -
-        0.399912 *
-        Math.cos(gamma)
-        +
-        0.070257 *
-        Math.sin(gamma)
-        -
-        0.006758 *
-        Math.cos(
-            2 * gamma
-        )
-        +
-        0.000907 *
-        Math.sin(
-            2 * gamma
-        )
-        -
-        0.002697 *
-        Math.cos(
-            3 * gamma
-        )
-        +
-        0.001480 *
-        Math.sin(
-            3 * gamma
-        );
-
-    const latRad =
-        SITE_LATITUDE *
-        Math.PI /
-        180;
-
-    const zenith =
-        90.833 *
-        Math.PI /
-        180;
-
-    const cosH =
-        (
-            Math.cos(zenith) /
+    const middle =
+        new Date(
             (
-                Math.cos(latRad) *
-                Math.cos(declination)
-            )
-        )
-        -
-        Math.tan(latRad) *
-        Math.tan(declination);
-
-    if (
-        cosH > 1 ||
-        cosH < -1
-    ) {
-        return {
-            sunrise: null,
-            sunset: null
-        };
-    }
-
-    const H =
-        Math.acos(cosH) *
-        180 /
-        Math.PI;
-
-    const noon =
-        720
-        -
-        4 * SITE_LONGITUDE
-        -
-        equationOfTime
-        +
-        SITE_TIMEZONE_OFFSET_MINUTES;
+                start.getTime() +
+                end.getTime()
+            ) / 2
+        );
 
     return {
 
         sunrise:
-            siteLocalTimeToDate(
-                p.year,
-                p.month,
-                p.day,
-                0,
-                noon - H * 4
-            ),
+            refineSunCrossing(start, middle, true),
 
         sunset:
-            siteLocalTimeToDate(
-                p.year,
-                p.month,
-                p.day,
-                0,
-                noon + H * 4
-            )
+            refineSunCrossing(middle, end, false)
     };
 }
 
 
+function refineSunCrossing(left, right, rising) {
+
+    const leftValue =
+        sunAltitudeFallback(left) -
+        SUN_RISE_SET_HORIZON;
+
+    const rightValue =
+        sunAltitudeFallback(right) -
+        SUN_RISE_SET_HORIZON;
+
+    // Sem cruzamento (Sol sempre acima ou abaixo do horizonte).
+    if (rising) {
+
+        if (!(leftValue < 0 && rightValue > 0)) {
+            return null;
+        }
+
+    } else {
+
+        if (!(leftValue > 0 && rightValue < 0)) {
+            return null;
+        }
+    }
+
+    for (let i = 0; i < 30; i++) {
+
+        const middle =
+            new Date(
+                (
+                    left.getTime() +
+                    right.getTime()
+                ) / 2
+            );
+
+        const value =
+            sunAltitudeFallback(middle) -
+            SUN_RISE_SET_HORIZON;
+
+        if (rising === (value < 0)) {
+            left = middle;
+        } else {
+            right = middle;
+        }
+    }
+
+    return new Date(
+        (
+            left.getTime() +
+            right.getTime()
+        ) / 2
+    );
+}
+
+
 // ============================================================
-// LUA — FALLBACK LOCAL
+// LUA — CÁLCULO LOCAL
 // ------------------------------------------------------------
-// Mantido somente como contingência quando o USNO não responder.
+// Modelo de dois corpos com as principais perturbações.
 // ============================================================
 
 function normalize360(
@@ -803,6 +748,9 @@ function moonPositionFallback(
             ) *
             180 /
             Math.PI,
+
+        eclipticLongitude:
+            normalize360(lon + lonPert),
 
         distance:
             rC
@@ -1124,53 +1072,31 @@ function calculateMoonTimesFallback() {
 
 
 // Aplica os horários de nascer/pôr da Lua já com o critério acima e a
-// cor de "outro dia". Os horários da USNO (que existem apenas para
-// eventos de hoje) são usados quando correspondem ao evento escolhido.
+// cor de "outro dia".
 function updateMoonRiseSet() {
 
     const moon =
         calculateMoonTimesFallback();
 
-    const useUsnoRise =
-        astronomyUsnoMoonrise &&
-        moon.moonrise &&
-        !moon.moonriseOutroDia &&
-        isSiteToday(astronomyUsnoMoonrise);
-
-    const useUsnoSet =
-        astronomyUsnoMoonset &&
-        moon.moonset &&
-        !moon.moonsetOutroDia &&
-        isSiteToday(astronomyUsnoMoonset);
-
     setMoonTime(
         "moonrise",
-        useUsnoRise ? astronomyUsnoMoonrise : moon.moonrise,
+        moon.moonrise,
         moon.moonriseOutroDia
     );
 
     setMoonTime(
         "moonset",
-        useUsnoSet ? astronomyUsnoMoonset : moon.moonset,
+        moon.moonset,
         moon.moonsetOutroDia
     );
 }
 
 
 // ============================================================
-// ASTRONOMIA — FALLBACK
+// SOL — EXIBIÇÃO
 // ============================================================
 
-function updateAstronomyLocalFallback() {
-
-    // A USNO é a fonte primária. Depois que ela for consultada para o
-    // dia atual, o cálculo local não deve mais sobrescrever os horários
-    // exibidos — antes, isto corria a cada 60 s e apagava os valores da
-    // USNO. Quando a USNO falha, os valores locais já são aplicados no
-    // tratamento de erro dela.
-    if (astronomyDateKey === getSiteDateKey()) {
-        return;
-    }
+function updateSunTimes() {
 
     const sun =
         calculateSunTimesFallback();
@@ -1186,252 +1112,6 @@ function updateAstronomyLocalFallback() {
         "sunset",
         formatSiteTime(
             sun.sunset
-        )
-    );
-}
-
-
-// ============================================================
-// ASTRONOMIA — USNO
-// ============================================================
-
-function updateAstronomyFromUSNO() {
-
-    if (
-        astronomyRequestInProgress
-    ) {
-        return;
-    }
-
-    const dateKey =
-        getSiteDateKey();
-
-    if (
-        astronomyDateKey ===
-        dateKey
-    ) {
-        return;
-    }
-
-    astronomyRequestInProgress =
-        true;
-
-    const p =
-        getSiteDateParts();
-
-    const url =
-        USNO_API_BASE +
-        "?date=" +
-        dateKey +
-        "&coords=" +
-        SITE_LATITUDE +
-        "," +
-        SITE_LONGITUDE +
-        "&tz=-3";
-
-    ctx.http.get(url).subscribe(
-
-        response => {
-
-            try {
-
-                const data =
-                    response &&
-                    response.properties &&
-                    response.properties.data
-                        ? response.properties.data
-                        : response &&
-                          response.data
-                            ? response.data
-                            : response;
-
-                const sunData =
-                    data &&
-                    Array.isArray(
-                        data.sundata
-                    )
-                        ? data.sundata
-                        : [];
-
-                const moonData =
-                    data &&
-                    Array.isArray(
-                        data.moondata
-                    )
-                        ? data.moondata
-                        : [];
-                        
-                const sunrise =
-                    findUSNOEvent(
-                        sunData,
-                        ["Rise"],
-                        p.year,
-                        p.month,
-                        p.day
-                    );
-
-                const sunset =
-                    findUSNOEvent(
-                        sunData,
-                        ["Set"],
-                        p.year,
-                        p.month,
-                        p.day
-                    );
-
-                const moonrise =
-                    findUSNOEvent(
-                        moonData,
-                        ["Rise"],
-                        p.year,
-                        p.month,
-                        p.day
-                    );
-
-                const moonset =
-                    findUSNOEvent(
-                        moonData,
-                        ["Set"],
-                        p.year,
-                        p.month,
-                        p.day
-                    );
-
-                if (
-                    sunrise ||
-                    sunset ||
-                    moonrise ||
-                    moonset
-                ) {
-
-                    setText(
-                        "sunrise",
-                        formatSiteTime(
-                            sunrise
-                        )
-                    );
-
-                    setText(
-                        "sunset",
-                        formatSiteTime(
-                            sunset
-                        )
-                    );
-
-                    // A USNO só informa eventos de hoje; os horários
-                    // são guardados e o critério de exibição é
-                    // aplicado em updateMoonRiseSet().
-                    astronomyUsnoMoonrise =
-                        moonrise;
-
-                    astronomyUsnoMoonset =
-                        moonset;
-
-                    updateMoonRiseSet();
-
-                    astronomyDateKey =
-                        dateKey;
-
-                } else {
-
-                    console.warn(
-                        "USNO não retornou eventos."
-                    );
-
-                    updateAstronomyLocalFallback();
-
-                    astronomyDateKey =
-                        dateKey;
-                }
-
-            } catch (error) {
-
-                console.error(
-                    "Erro ao interpretar USNO:",
-                    error
-                );
-
-                updateAstronomyLocalFallback();
-
-                astronomyDateKey =
-                    dateKey;
-            }
-
-            astronomyRequestInProgress =
-                false;
-        },
-
-        error => {
-
-            console.warn(
-                "USNO indisponível; usando fallback local.",
-                error
-            );
-
-            updateAstronomyLocalFallback();
-
-            astronomyDateKey =
-                dateKey;
-
-            astronomyRequestInProgress =
-                false;
-        }
-    );
-}
-
-
-// ============================================================
-// FASES DA LUA — USNO
-// ------------------------------------------------------------
-// Usa as datas das fases principais calculadas pelo USNO.
-// A idade da Lua é o tempo decorrido desde a última Lua Nova.
-// ============================================================
-
-function getSiteDateKeyOffset(days) {
-
-    const d =
-        new Date(
-            getSiteNow().getTime() +
-            days * 86400000
-        );
-
-    return (
-        String(d.getUTCFullYear()).padStart(4, "0") +
-        "-" +
-        String(d.getUTCMonth() + 1).padStart(2, "0") +
-        "-" +
-        String(d.getUTCDate()).padStart(2, "0")
-    );
-}
-
-
-function parseUSNOPhaseDate(item) {
-
-    if (!item) return null;
-
-    const year = Number(item.year);
-    const month = Number(item.month);
-    const day = Number(item.day);
-
-    const match =
-        String(item.time || "").match(/^(\d{1,2}):(\d{2})/);
-
-    if (!Number.isFinite(year) ||
-        !Number.isFinite(month) ||
-        !Number.isFinite(day) ||
-        !match) {
-        return null;
-    }
-
-    return new Date(
-        Date.UTC(
-            year,
-            month - 1,
-            day,
-            Number(match[1]),
-            Number(match[2]),
-            0,
-            0
         )
     );
 }
@@ -1490,18 +1170,149 @@ function getMoonPhaseInfo(ageDays) {
 
 
 // ============================================================
-// FASES DA LUA — FALLBACK LOCAL
+// FASES DA LUA — CÁLCULO LOCAL
 // ------------------------------------------------------------
-// Contingência quando a USNO não responde. A USNO continua sendo
-// a fonte primária: quando houver resposta dela, os dados da
-// USNO sobrescrevem este cálculo.
+// A fase vem da elongação real Sol–Lua (as longitudes eclípticas
+// já são calculadas pelos modelos local do Sol e da Lua). As
+// datas das próximas fases são obtidas por bisseção.
 // ============================================================
 
-// Lua Nova de referência: 2000-01-06 18:14 UTC (JD 2451550.1).
-const MOON_REFERENCE_NEW_MOON_JD = 2451550.1;
+// Elongação Sol–Lua em graus (0 = Lua nova, 180 = Lua cheia).
+function solarLunarElongation(date) {
 
-// Duração média de uma lunação, em dias.
-const SYNODIC_MONTH_DAYS = 29.530588853;
+    const jd =
+        julianDay(date);
+
+    const sun =
+        sunPositionFallback(jd);
+
+    const moon =
+        moonPositionFallback(jd);
+
+    return normalize360(
+        moon.eclipticLongitude -
+        sun.eclipticLongitude
+    );
+}
+
+
+// Diferença (graus) entre a elongação e uma fase alvo,
+// normalizada para (-180, 180]. Zero indica a fase exata.
+function phaseOffset(date, targetDeg) {
+
+    let offset =
+        solarLunarElongation(date) - targetDeg;
+
+    offset =
+        normalize360(offset);
+
+    if (offset > 180) {
+        offset -= 360;
+    }
+
+    return offset;
+}
+
+
+// Instante exato da fase entre dois instantes que a contêm.
+function bisectPhase(leftMs, rightMs, targetDeg) {
+
+    for (let i = 0; i < 40; i++) {
+
+        const middleMs =
+            (leftMs + rightMs) / 2;
+
+        if (
+            phaseOffset(new Date(middleMs), targetDeg) <= 0
+        ) {
+            leftMs = middleMs;
+        } else {
+            rightMs = middleMs;
+        }
+    }
+
+    return new Date(
+        (leftMs + rightMs) / 2
+    );
+}
+
+
+// Primeira ocorrência da fase alvo depois de fromMs.
+function findNextPhase(fromMs, targetDeg) {
+
+    const stepMs =
+        6 * 3600000;
+
+    const limitMs =
+        fromMs + 40 * 86400000;
+
+    let previousMs = fromMs;
+
+    let previousOffset =
+        phaseOffset(new Date(previousMs), targetDeg);
+
+    for (
+        let t = fromMs + stepMs;
+        t <= limitMs;
+        t += stepMs
+    ) {
+
+        const offset =
+            phaseOffset(new Date(t), targetDeg);
+
+        if (previousOffset <= 0 && offset > 0) {
+            return bisectPhase(previousMs, t, targetDeg);
+        }
+
+        previousMs = t;
+        previousOffset = offset;
+    }
+
+    return null;
+}
+
+
+// Última ocorrência da fase alvo antes de toMs.
+function findPreviousPhase(toMs, targetDeg) {
+
+    const stepMs =
+        6 * 3600000;
+
+    const startMs =
+        toMs - 40 * 86400000;
+
+    let result = null;
+
+    let previousMs = startMs;
+
+    let previousOffset =
+        phaseOffset(new Date(previousMs), targetDeg);
+
+    for (
+        let t = startMs + stepMs;
+        t <= toMs;
+        t += stepMs
+    ) {
+
+        const offset =
+            phaseOffset(new Date(t), targetDeg);
+
+        if (previousOffset <= 0 && offset > 0) {
+
+            const instant =
+                bisectPhase(previousMs, t, targetDeg);
+
+            if (instant.getTime() <= toMs) {
+                result = instant;
+            }
+        }
+
+        previousMs = t;
+        previousOffset = offset;
+    }
+
+    return result;
+}
 
 
 function updateMoonEventFallback(
@@ -1548,13 +1359,13 @@ function updateMoonPhaseFallback() {
     const now =
         new Date();
 
-    let ageDays =
-        (julianDay(now) - MOON_REFERENCE_NEW_MOON_JD) %
-        SYNODIC_MONTH_DAYS;
+    const previousNew =
+        findPreviousPhase(now.getTime(), 0);
 
-    if (ageDays < 0) {
-        ageDays += SYNODIC_MONTH_DAYS;
-    }
+    const ageDays =
+        previousNew
+            ? (now.getTime() - previousNew.getTime()) / 86400000
+            : 0;
 
     const phase =
         getMoonPhaseInfo(ageDays);
@@ -1575,325 +1386,60 @@ function updateMoonPhaseFallback() {
         " dias"
     );
 
-    const daysToFull =
-        (
-            (SYNODIC_MONTH_DAYS / 2) -
-            ageDays +
-            SYNODIC_MONTH_DAYS
-        ) %
-        SYNODIC_MONTH_DAYS;
+    const nextFull =
+        findNextPhase(now.getTime(), 180);
 
-    const daysToNew =
-        (SYNODIC_MONTH_DAYS - ageDays) %
-        SYNODIC_MONTH_DAYS;
+    const nextNew =
+        findNextPhase(now.getTime(), 0);
 
     updateMoonEventFallback(
         "#nextFullMoon",
         "Lua cheia",
         "🌕",
-        new Date(now.getTime() + daysToFull * 86400000)
+        nextFull
     );
 
     updateMoonEventFallback(
         "#nextNewMoon",
         "Lua nova",
         "🌑",
-        new Date(now.getTime() + daysToNew * 86400000)
+        nextNew
     );
-}
 
-
-function updateMoonPhaseDisplay(phases) {
-
-    if (!Array.isArray(phases) || !phases.length) {
-        return;
-    }
-
-    moonPhaseLastPhases = phases;
-
-    const now = new Date();
-
-    const events =
-        phases
-            .map(item => ({
-                phase: String(item.phase || "").trim(),
-                date: parseUSNOPhaseDate(item)
-            }))
-            .filter(item => item.date);
-
-    const newMoons =
-        events.filter(item =>
-            /new moon/i.test(item.phase)
-        );
-
-    const fullMoons =
-        events.filter(item =>
-            /full moon/i.test(item.phase)
-        );
-
-    const previousNew =
-        newMoons
-            .filter(item =>
-                item.date.getTime() <= now.getTime()
-            )
-            .sort((a, b) => b.date - a.date)[0];
-
-    if (previousNew) {
-
-        const ageDays =
-            (now.getTime() - previousNew.date.getTime()) /
-            86400000;
-
-        const phase =
-            getMoonPhaseInfo(ageDays);
-
-        setText(
-            "moonIcon",
-            phase.icon
-        );
-
-        setText(
-            "moonPhaseName",
-            phase.name
-        );
-
-        setText(
-            "moonAge",
-            ageDays.toFixed(1).replace(".", ",") +
-            " dias"
-        );
-    }
-
-    const nextFull =
-        fullMoons
-            .filter(item =>
-                item.date.getTime() > now.getTime()
-            )
-            .sort((a, b) => a.date - b.date)[0];
-
-    const nextNew =
-        newMoons
-            .filter(item =>
-                item.date.getTime() > now.getTime()
-            )
-            .sort((a, b) => a.date - b.date)[0];
-
-
-    // ========================================================
-    // PRÓXIMA LUA CHEIA
-    // ========================================================
-
-    if (nextFull) {
-
-        const el =
-            container.querySelector("#nextFullMoon");
-
-        if (el) {
-
-            const label =
-                el.querySelector(".moon-event-label");
-
-            const icon =
-                el.querySelector(".moon-event-icon");
-
-            const date =
-                el.querySelector(".moon-event-date");
-
-            if (label) {
-                label.textContent = "Lua cheia";
-            }
-
-            if (icon) {
-                icon.textContent = "🌕";
-            }
-
-            if (date) {
-                date.textContent =
-                    "em " +
-                    formatMoonEventDate(
-                        nextFull.date
-                    );
-            }
-        }
-    }
-
-
-    // ========================================================
-    // PRÓXIMA LUA NOVA
-    // ========================================================
-
-    if (nextNew) {
-
-        const el =
-            container.querySelector("#nextNewMoon");
-
-        if (el) {
-
-            const label =
-                el.querySelector(".moon-event-label");
-
-            const icon =
-                el.querySelector(".moon-event-icon");
-
-            const date =
-                el.querySelector(".moon-event-date");
-
-            if (label) {
-                label.textContent = "Lua nova";
-            }
-
-            if (icon) {
-                icon.textContent = "🌑";
-            }
-
-            if (date) {
-                date.textContent =
-                    "em " +
-                    formatMoonEventDate(
-                        nextNew.date
-                    );
-            }
-        }
-    }
-
-
-    // ========================================================
-    // ORDEM CRONOLÓGICA DOS DOIS EVENTOS
-    // --------------------------------------------------------
-    // O evento com a data mais próxima aparece primeiro. Apenas
-    // move os elementos já existentes na lista, sem alterar
-    // conteúdo, IDs ou classes.
-    // ========================================================
-
-    const moonEventsList =
+    // Mostra primeiro a próxima fase a ocorrer.
+    const moonEvents =
         container.querySelector(".moon-events");
 
-    const fullMoonEvent =
+    const fullEvent =
         container.querySelector("#nextFullMoon");
 
-    const newMoonEvent =
+    const newEvent =
         container.querySelector("#nextNewMoon");
 
-    if (moonEventsList && fullMoonEvent && newMoonEvent) {
+    if (moonEvents && fullEvent && newEvent) {
 
-        let firstEvent = null;
-        let secondEvent = null;
+        const fullFirst =
+            nextFull &&
+            nextNew &&
+            nextFull.getTime() < nextNew.getTime();
 
-        if (nextFull && nextNew) {
-
-            if (
-                nextFull.date.getTime() <=
-                nextNew.date.getTime()
-            ) {
-                firstEvent = fullMoonEvent;
-                secondEvent = newMoonEvent;
-            } else {
-                firstEvent = newMoonEvent;
-                secondEvent = fullMoonEvent;
-            }
-
-        } else if (nextNew) {
-
-            firstEvent = newMoonEvent;
-            secondEvent = fullMoonEvent;
-
-        } else if (nextFull) {
-
-            firstEvent = fullMoonEvent;
-            secondEvent = newMoonEvent;
-        }
-
-        if (firstEvent && secondEvent) {
-            moonEventsList.appendChild(firstEvent);
-            moonEventsList.appendChild(secondEvent);
+        if (fullFirst) {
+            moonEvents.appendChild(fullEvent);
+            moonEvents.appendChild(newEvent);
+        } else {
+            moonEvents.appendChild(newEvent);
+            moonEvents.appendChild(fullEvent);
         }
     }
-}
-
-function updateMoonPhasesFromUSNO() {
-
-    if (moonPhaseRequestInProgress) {
-        return;
-    }
-
-    const dateKey =
-        getSiteDateKey();
-
-    if (moonPhaseDateKey === dateKey) {
-        return;
-    }
-
-    // Novo dia ainda sem dados atualizados da USNO: descarta o
-    // conjunto anterior para que o fallback local assuma até a
-    // USNO responder. Quando a USNO responder, os dados dela
-    // voltam a ter prioridade.
-    moonPhaseLastPhases = null;
-
-    moonPhaseRequestInProgress = true;
-
-    const startDate =
-        getSiteDateKeyOffset(-40);
-
-    const url =
-        USNO_MOON_PHASES_API +
-        "?date=" +
-        startDate +
-        "&nump=12";
-
-    ctx.http.get(url).subscribe(
-
-        response => {
-
-            try {
-
-                const phases =
-                    response && Array.isArray(response.phasedata)
-                        ? response.phasedata
-                        : response &&
-                          response.data &&
-                          Array.isArray(response.data.phasedata)
-                            ? response.data.phasedata
-                            : [];
-
-                if (phases.length) {
-                    updateMoonPhaseDisplay(phases);
-                    moonPhaseDateKey = dateKey;
-                }
-
-            } catch (error) {
-
-                console.error(
-                    "Erro ao interpretar fases da Lua:",
-                    error
-                );
-            }
-
-            moonPhaseRequestInProgress = false;
-        },
-
-        error => {
-
-            console.warn(
-                "USNO indisponível para fases da Lua.",
-                error
-            );
-
-            moonPhaseRequestInProgress = false;
-        }
-    );
 }
 
 
 // ============================================================
 // ESTAÇÕES DO ANO — HEMISFÉRIO SUL
 // ------------------------------------------------------------
-// Fonte: USNO (seasons). O serviço devolve equinócios e
-// solstícios já no fuso do sítio (parâmetro tz), portanto
-// pode-se reutilizar siteLocalTimeToDate().
+// Equinócios e solstícios calculados localmente (fórmulas de
+// Meeus, cap. 27).
 // ============================================================
-
-const USNO_SEASONS_API =
-    "https://aa.usno.navy.mil/api/seasons";
 
 // Equinócios e solstícios vistos do hemisfério Sul.
 const SOUTH_SEASONS = {
@@ -1902,58 +1448,6 @@ const SOUTH_SEASONS = {
     9: { name: "Primavera", icon: "🌸" },
     12: { name: "Verão", icon: "☀️" }
 };
-
-let seasonEventsByYear = {};
-let seasonRequestedYears = {};
-let seasonPendingYears = {};
-
-
-function parseUSNOSeasonEvent(item) {
-
-    if (!item || typeof item !== "object") {
-        return null;
-    }
-
-    const phenom =
-        String(item.phenom || "").trim().toLowerCase();
-
-    if (
-        phenom !== "equinox" &&
-        phenom !== "solstice"
-    ) {
-        return null;
-    }
-
-    const month = Number(item.month);
-    const year = Number(item.year);
-    const day = Number(item.day);
-
-    const season = SOUTH_SEASONS[month];
-
-    const match =
-        String(item.time || "").match(/^(\d{1,2}):(\d{2})/);
-
-    if (
-        !season ||
-        !match ||
-        !Number.isFinite(year) ||
-        !Number.isFinite(day)
-    ) {
-        return null;
-    }
-
-    return {
-        name: season.name,
-        icon: season.icon,
-        date: siteLocalTimeToDate(
-            year,
-            month,
-            day,
-            Number(match[1]),
-            Number(match[2])
-        )
-    };
-}
 
 
 function formatSeasonDate(date) {
@@ -1992,80 +1486,12 @@ function formatSeasonDate(date) {
     );
 }
 
-function updateSeasonDisplay() {
-
-    const year =
-        getSiteDateParts().year;
-
-    const events =
-        (seasonEventsByYear[year - 1] || [])
-            .concat(seasonEventsByYear[year] || [])
-            .concat(seasonEventsByYear[year + 1] || []);
-
-    if (!events.length) {
-        return;
-    }
-
-    const sorted =
-        events
-            .slice()
-            .sort((a, b) => a.date - b.date);
-
-    const now =
-        new Date();
-
-    const previous =
-        sorted.filter(
-            item => item.date.getTime() <= now.getTime()
-        );
-
-    const current =
-        previous[previous.length - 1];
-
-    const next =
-        sorted.filter(
-            item => item.date.getTime() > now.getTime()
-        )[0];
-
-    const nowIcon =
-        container.querySelector("#seasonNowIcon");
-
-    const nowName =
-        container.querySelector("#seasonNowName");
-
-    const nextIcon =
-        container.querySelector("#seasonNextIcon");
-
-    const nextText =
-        container.querySelector("#seasonNextText");
-
-    if (nowIcon && current) {
-        nowIcon.textContent = current.icon;
-    }
-
-    if (nowName && current) {
-        nowName.textContent = current.name;
-    }
-
-    if (nextIcon && next) {
-        nextIcon.textContent = next.icon;
-    }
-
-    if (nextText && next) {
-        nextText.textContent =
-            next.name +
-            " em " +
-            formatSeasonDate(next.date);
-    }
-}
-
 
 // ============================================================
-// ESTAÇÕES — FALLBACK LOCAL
+// ESTAÇÕES — CÁLCULO LOCAL
 // ------------------------------------------------------------
 // Aproximação pelas fórmulas de Meeus (Astronomical Algorithms,
-// cap. 27). Usado apenas quando a USNO não responde; a USNO
-// continua sendo a fonte primária.
+// cap. 27).
 // ============================================================
 
 function seasonEventFallbackJDE(year, index) {
@@ -2195,112 +1621,15 @@ function updateSeasonFallback() {
 }
 
 
-function requestSeasonYear(year) {
-
-    if (
-        seasonRequestedYears[year] ||
-        seasonPendingYears[year]
-    ) {
-        return;
-    }
-
-    seasonPendingYears[year] = true;
-
-    const url =
-        USNO_SEASONS_API +
-        "?year=" + year +
-        "&tz=" +
-        (SITE_TIMEZONE_OFFSET_MINUTES / 60);
-
-    ctx.http.get(url).subscribe(
-
-        response => {
-
-            try {
-
-                const data =
-                    response && Array.isArray(response.data)
-                        ? response.data
-                        : [];
-
-                const events =
-                    data
-                        .map(item => parseUSNOSeasonEvent(item))
-                        .filter(Boolean);
-
-                if (events.length) {
-                    seasonEventsByYear[year] = events;
-                    seasonRequestedYears[year] = true;
-                    updateSeasonDisplay();
-                }
-
-            } catch (error) {
-
-                console.error(
-                    "Erro ao interpretar estações:",
-                    error
-                );
-            }
-
-            seasonPendingYears[year] = false;
-        },
-
-        error => {
-
-            console.warn(
-                "USNO indisponível para estações.",
-                error
-            );
-
-            seasonPendingYears[year] = false;
-        }
-    );
-}
-
-
-function updateSeasonsFromUSNO() {
-
-    const parts =
-        getSiteDateParts();
-
-    requestSeasonYear(parts.year);
-
-    // Em janeiro/início de ano a estação atual começou no ano anterior.
-    if (parts.month <= 3) {
-        requestSeasonYear(parts.year - 1);
-    }
-
-    // Depois do solstício de dezembro a próxima estação é do ano seguinte.
-    if (parts.month === 12) {
-        requestSeasonYear(parts.year + 1);
-    }
-
-    updateSeasonDisplay();
-}
-
-
 function updateAstronomy() {
 
-    // Sol: USNO (quando disponível) ou cálculo local.
-    updateAstronomyLocalFallback();
+    updateSunTimes();
 
-    // Lua: critério dependente do momento atual (ver updateMoonRiseSet).
     updateMoonRiseSet();
 
-    // Fallbacks locais de contingência da fase da Lua e das estações,
-    // usados apenas quando a USNO não responde. A USNO tem
-    // prioridade: quando houver dados dela, eles sobrescrevem
-    // o cálculo local logo abaixo.
     updateMoonPhaseFallback();
+
     updateSeasonFallback();
-
-    updateAstronomyFromUSNO();
-    updateMoonPhasesFromUSNO();
-    updateSeasonsFromUSNO();
-
-    if (moonPhaseLastPhases) {
-        updateMoonPhaseDisplay(moonPhaseLastPhases);
-    }
 }
 
 // ============================================================
