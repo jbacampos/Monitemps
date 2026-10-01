@@ -52,6 +52,52 @@ function setMoonTime(id, date, outroDia) {
     }
 }
 
+
+// ============================================================
+// LAYOUT — CLASSES CONFORME A LARGURA DO CARD
+// ------------------------------------------------------------
+// O ThingsBoard "achata" as media queries do CSS do widget (as
+// regras de @media passam a valer sempre). Por isso o layout
+// responsivo é aplicado por classes, com base na largura/altura
+// reais do card.
+// ============================================================
+
+const LAYOUT_XS_MAX_WIDTH = 480;
+const LAYOUT_XXS_MAX_WIDTH = 360;
+const LAYOUT_SHORT_MAX_HEIGHT = 450;
+
+
+function updateLayoutClass() {
+
+    const card =
+        container.querySelector(".card");
+
+    if (!card) {
+        return;
+    }
+
+    const width =
+        container.clientWidth;
+
+    const height =
+        container.clientHeight;
+
+    card.classList.toggle(
+        "card--xs",
+        width <= LAYOUT_XS_MAX_WIDTH
+    );
+
+    card.classList.toggle(
+        "card--xxs",
+        width <= LAYOUT_XXS_MAX_WIDTH
+    );
+
+    card.classList.toggle(
+        "card--short",
+        height <= LAYOUT_SHORT_MAX_HEIGHT
+    );
+}
+
 function formatTimestamp(ts) {
     const d = new Date(ts);
     const months = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
@@ -1825,6 +1871,20 @@ document.addEventListener("keydown", event => {
         helpOverlay.hidden = true;
     }
 });
+
+updateLayoutClass();
+
+window.addEventListener(
+    "resize",
+    updateLayoutClass
+);
+
+if (typeof ResizeObserver !== "undefined") {
+
+    new ResizeObserver(
+        updateLayoutClass
+    ).observe(container);
+}
 
 setInterval(updateGlobalStaleness, 30000);
 updateAstronomy();
