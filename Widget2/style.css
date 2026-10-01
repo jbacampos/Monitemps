@@ -144,6 +144,9 @@
 }
 .astro-row + .astro-row { margin-top: 3px; }
 
+/* Horário da Lua pertencente a outro dia (nasceu ontem / põe amanhã). */
+.moon-outro-dia { color: #e8913c; }
+
 
 /* FASE DA LUA */
 .moon-phase-row {

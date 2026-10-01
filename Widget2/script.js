@@ -12,12 +12,40 @@ const SITE_LONGITUDE = -51.585233;
 // O Sítio opera em UTC-3.
 const SITE_TIMEZONE_OFFSET_MINUTES = -180;
 
+// Horizonte de nascer/pôr da Lua na convenção da USNO: bordo superior
+// aparente, considerando refração (~0,57°) e semidiâmetro (~0,26°).
+// Como moonAltitudeFallback devolve a altitude topocêntrica, o limiar
+// corresponde a -(refração + semidiâmetro).
+const MOON_RISE_SET_HORIZON = -0.825;
+
 let lastUpdateTimestamp = null;
 
 function setText(id, value) {
     const el = container.querySelector("#" + id);
     
     if (el) el.textContent = value;
+}
+
+
+function setMoonTime(id, date, outroDia) {
+
+    const el =
+        container.querySelector("#" + id);
+
+    if (!el) {
+        return;
+    }
+
+    el.textContent =
+        formatSiteTime(date);
+
+    if (el.classList) {
+
+        el.classList.toggle(
+            "moon-outro-dia",
+            !!outroDia
+        );
+    }
 }
 
 function formatTimestamp(ts) {
@@ -66,6 +94,8 @@ const USNO_MOON_PHASES_API =
 
 let astronomyDateKey = null;
 let astronomyRequestInProgress = false;
+let astronomyUsnoMoonrise = null;
+let astronomyUsnoMoonset = null;
 let moonPhaseDateKey = null;
 let moonPhaseRequestInProgress = false;
 let moonPhaseLastPhases = null;
@@ -115,6 +145,30 @@ function getSiteDateKey() {
         String(p.month).padStart(2, "0") +
         "-" +
         String(p.day).padStart(2, "0")
+    );
+}
+
+
+// Indica se um instante pertence ao dia civil atual do sítio.
+function isSiteToday(date) {
+
+    if (!(date instanceof Date)) {
+        return false;
+    }
+
+    const p =
+        getSiteDateParts();
+
+    const local =
+        new Date(
+            date.getTime() +
+            SITE_TIMEZONE_OFFSET_MINUTES * 60000
+        );
+
+    return (
+        local.getUTCFullYear() === p.year &&
+        local.getUTCMonth() + 1 === p.month &&
+        local.getUTCDate() === p.day
     );
 }
 
@@ -533,6 +587,30 @@ function moonPositionFallback(
             13.0649929509 * d
         );
 
+    // Elementos do Sol, necessários às perturbações da Lua.
+    const ws =
+        282.9404 +
+        4.70935e-5 * d;
+
+    const Ms =
+        normalize360(
+            356.0470 +
+            0.9856002585 * d
+        );
+
+    // Argumentos médios usados nas perturbações.
+    const Lm =
+        normalize360(N + w + M);
+
+    const Ls =
+        normalize360(Ms + ws);
+
+    const D =
+        normalize360(Lm - Ls);
+
+    const F =
+        normalize360(Lm - N);
+
     const Mr =
         M *
         Math.PI /
@@ -616,23 +694,91 @@ function moonPositionFallback(
         Math.sin(v + wr) *
         Math.sin(ir);
 
+    // Longitude e latitude eclípticas (geocêntricas, geométricas).
+    const lon =
+        Math.atan2(yh, xh) *
+        180 /
+        Math.PI;
+
+    const lat =
+        Math.atan2(
+            zh,
+            Math.sqrt(xh * xh + yh * yh)
+        ) *
+        180 /
+        Math.PI;
+
+    // Perturbações principais da Lua (Schlyter).
+    const Dr = D * Math.PI / 180;
+    const Fr = F * Math.PI / 180;
+    const MrP = M * Math.PI / 180;
+    const MsP = Ms * Math.PI / 180;
+
+    const lonPert =
+        -1.274 * Math.sin(MrP - 2 * Dr)
+        + 0.658 * Math.sin(2 * Dr)
+        - 0.186 * Math.sin(MsP)
+        - 0.059 * Math.sin(2 * MrP - 2 * Dr)
+        - 0.057 * Math.sin(MrP - 2 * Dr + MsP)
+        + 0.053 * Math.sin(MrP + 2 * Dr)
+        + 0.046 * Math.sin(2 * Dr - MsP)
+        + 0.041 * Math.sin(MrP - MsP)
+        - 0.035 * Math.sin(Dr)
+        - 0.031 * Math.sin(MrP + MsP)
+        - 0.015 * Math.sin(2 * Fr - 2 * Dr)
+        + 0.011 * Math.sin(MrP - 4 * Dr);
+
+    const latPert =
+        -0.173 * Math.sin(Fr - 2 * Dr)
+        - 0.055 * Math.sin(MrP - Fr - 2 * Dr)
+        - 0.046 * Math.sin(MrP + Fr - 2 * Dr)
+        + 0.033 * Math.sin(Fr + 2 * Dr)
+        + 0.017 * Math.sin(2 * MrP + Fr);
+
+    const rPert =
+        -0.58 * Math.cos(MrP - 2 * Dr)
+        - 0.46 * Math.cos(2 * Dr);
+
+    // Posição eclíptica já corrigida (coordenadas retangulares).
+    const lonC =
+        (lon + lonPert) *
+        Math.PI /
+        180;
+
+    const latC =
+        (lat + latPert) *
+        Math.PI /
+        180;
+
+    const rC =
+        r + rPert;
+
+    const xhC =
+        rC * Math.cos(latC) * Math.cos(lonC);
+
+    const yhC =
+        rC * Math.cos(latC) * Math.sin(lonC);
+
+    const zhC =
+        rC * Math.sin(latC);
+
     const obliquity =
         23.4393 *
         Math.PI /
         180;
 
     const ye =
-        yh *
+        yhC *
         Math.cos(obliquity)
         -
-        zh *
+        zhC *
         Math.sin(obliquity);
 
     const ze =
-        yh *
+        yhC *
         Math.sin(obliquity)
         +
-        zh *
+        zhC *
         Math.cos(obliquity);
 
     return {
@@ -641,7 +787,7 @@ function moonPositionFallback(
             normalize360(
                 Math.atan2(
                     ye,
-                    xh
+                    xhC
                 ) *
                 180 /
                 Math.PI
@@ -651,7 +797,7 @@ function moonPositionFallback(
             Math.atan2(
                 ze,
                 Math.sqrt(
-                    xh * xh +
+                    xhC * xhC +
                     ye * ye
                 )
             ) *
@@ -659,7 +805,7 @@ function moonPositionFallback(
             Math.PI,
 
         distance:
-            r
+            rC
     };
 }
 
@@ -734,7 +880,7 @@ function moonAltitudeFallback(
         Math.PI /
         180;
 
-    return (
+    const geocentric =
         Math.asin(
             Math.sin(lat) *
             Math.sin(dec)
@@ -742,10 +888,24 @@ function moonAltitudeFallback(
             Math.cos(lat) *
             Math.cos(dec) *
             Math.cos(haRad)
-        )
-        *
+        ) *
         180 /
-        Math.PI
+        Math.PI;
+
+    // Paralaxe: converte a altitude geocêntrica em topocêntrica (o
+    // observador está na superfície, não no centro da Terra).
+    const parallax =
+        Math.asin(
+            1 /
+            moon.distance
+        ) *
+        180 /
+        Math.PI;
+
+    return (
+        geocentric -
+        parallax *
+        Math.cos(geocentric * Math.PI / 180)
     );
 }
 
@@ -809,6 +969,77 @@ function refineMoonCrossingFallback(
 }
 
 
+function collectMoonCrossings(startMs, endMs, stepMs) {
+
+    const horizon = MOON_RISE_SET_HORIZON;
+
+    const crossings = [];
+
+    let previous =
+        new Date(startMs);
+
+    let previousAltitude =
+        moonAltitudeFallback(previous);
+
+    for (let t = startMs + stepMs; t <= endMs; t += stepMs) {
+
+        const current =
+            new Date(t);
+
+        const altitude =
+            moonAltitudeFallback(current);
+
+        if (previousAltitude < horizon && altitude >= horizon) {
+
+            crossings.push({
+                type: "rise",
+                date: refineMoonCrossingFallback(previous, current, horizon, true)
+            });
+
+        } else if (previousAltitude >= horizon && altitude < horizon) {
+
+            crossings.push({
+                type: "set",
+                date: refineMoonCrossingFallback(previous, current, horizon, false)
+            });
+        }
+
+        previous = current;
+        previousAltitude = altitude;
+    }
+
+    return crossings;
+}
+
+
+function lastCrossingBefore(crossings, type, ms) {
+
+    let found = null;
+
+    for (const c of crossings) {
+
+        if (c.type === type && c.date.getTime() < ms) {
+            found = c.date;
+        }
+    }
+
+    return found;
+}
+
+
+function firstCrossingAfter(crossings, type, ms) {
+
+    for (const c of crossings) {
+
+        if (c.type === type && c.date.getTime() > ms) {
+            return c.date;
+        }
+    }
+
+    return null;
+}
+
+
 function calculateMoonTimesFallback() {
 
     const p =
@@ -832,86 +1063,97 @@ function calculateMoonTimesFallback() {
             1440
         );
 
-    const horizon =
-        -0.30;
-
     const step =
         5 * 60 * 1000;
 
-    let previous =
-        start;
-
-    let previousAltitude =
-        moonAltitudeFallback(
-            previous
+    // Cruzamentos cobrindo ontem, hoje e amanhã, para encontrar os
+    // eventos vizinhos do momento atual.
+    const crossings =
+        collectMoonCrossings(
+            start.getTime() - 86400000,
+            end.getTime() + 86400000,
+            step
         );
 
-    let rise = null;
-    let set = null;
+    const now =
+        new Date();
 
-    for (
-        let t =
-            start.getTime() + step;
+    const nowMs =
+        now.getTime();
 
-        t <=
-            end.getTime();
+    const aboveHorizon =
+        moonAltitudeFallback(now) >= MOON_RISE_SET_HORIZON;
 
-        t += step
-    ) {
+    let moonrise = null;
+    let moonset = null;
 
-        const current =
-            new Date(t);
+    if (aboveHorizon) {
 
-        const altitude =
-            moonAltitudeFallback(
-                current
-            );
+        // A Lua está no céu: último nascer (antes de agora) e próximo
+        // pôr (depois de agora). Podem ser de datas civis diferentes.
+        moonrise =
+            lastCrossingBefore(crossings, "rise", nowMs);
 
-        if (
-            !rise &&
-            previousAltitude <
-                horizon &&
-            altitude >=
-                horizon
-        ) {
+        moonset =
+            firstCrossingAfter(crossings, "set", nowMs);
 
-            rise =
-                refineMoonCrossingFallback(
-                    previous,
-                    current,
-                    horizon,
-                    true
-                );
-        }
+    } else {
 
-        if (
-            !set &&
-            previousAltitude >=
-                horizon &&
-            altitude <
-                horizon
-        ) {
+        // A Lua não está no céu: próximo nascer e o pôr correspondente
+        // a esse mesmo período de visibilidade.
+        moonrise =
+            firstCrossingAfter(crossings, "rise", nowMs);
 
-            set =
-                refineMoonCrossingFallback(
-                    previous,
-                    current,
-                    horizon,
-                    false
-                );
-        }
-
-        previous =
-            current;
-
-        previousAltitude =
-            altitude;
+        moonset =
+            moonrise
+                ? firstCrossingAfter(
+                    crossings,
+                    "set",
+                    moonrise.getTime()
+                )
+                : null;
     }
 
     return {
-        moonrise: rise,
-        moonset: set
+        moonrise: moonrise,
+        moonset: moonset,
+        moonriseOutroDia: !!moonrise && !isSiteToday(moonrise),
+        moonsetOutroDia: !!moonset && !isSiteToday(moonset)
     };
+}
+
+
+// Aplica os horários de nascer/pôr da Lua já com o critério acima e a
+// cor de "outro dia". Os horários da USNO (que existem apenas para
+// eventos de hoje) são usados quando correspondem ao evento escolhido.
+function updateMoonRiseSet() {
+
+    const moon =
+        calculateMoonTimesFallback();
+
+    const useUsnoRise =
+        astronomyUsnoMoonrise &&
+        moon.moonrise &&
+        !moon.moonriseOutroDia &&
+        isSiteToday(astronomyUsnoMoonrise);
+
+    const useUsnoSet =
+        astronomyUsnoMoonset &&
+        moon.moonset &&
+        !moon.moonsetOutroDia &&
+        isSiteToday(astronomyUsnoMoonset);
+
+    setMoonTime(
+        "moonrise",
+        useUsnoRise ? astronomyUsnoMoonrise : moon.moonrise,
+        moon.moonriseOutroDia
+    );
+
+    setMoonTime(
+        "moonset",
+        useUsnoSet ? astronomyUsnoMoonset : moon.moonset,
+        moon.moonsetOutroDia
+    );
 }
 
 
@@ -920,6 +1162,15 @@ function calculateMoonTimesFallback() {
 // ============================================================
 
 function updateAstronomyLocalFallback() {
+
+    // A USNO é a fonte primária. Depois que ela for consultada para o
+    // dia atual, o cálculo local não deve mais sobrescrever os horários
+    // exibidos — antes, isto corria a cada 60 s e apagava os valores da
+    // USNO. Quando a USNO falha, os valores locais já são aplicados no
+    // tratamento de erro dela.
+    if (astronomyDateKey === getSiteDateKey()) {
+        return;
+    }
 
     const sun =
         calculateSunTimesFallback();
@@ -937,27 +1188,6 @@ function updateAstronomyLocalFallback() {
             sun.sunset
         )
     );
-
-    setTimeout(() => {
-
-        const moon =
-            calculateMoonTimesFallback();
-
-        setText(
-            "moonrise",
-            formatSiteTime(
-                moon.moonrise
-            )
-        );
-
-        setText(
-            "moonset",
-            formatSiteTime(
-                moon.moonset
-            )
-        );
-
-    }, 0);
 }
 
 
@@ -1088,19 +1318,16 @@ function updateAstronomyFromUSNO() {
                         )
                     );
 
-                    setText(
-                        "moonrise",
-                        formatSiteTime(
-                            moonrise
-                        )
-                    );
+                    // A USNO só informa eventos de hoje; os horários
+                    // são guardados e o critério de exibição é
+                    // aplicado em updateMoonRiseSet().
+                    astronomyUsnoMoonrise =
+                        moonrise;
 
-                    setText(
-                        "moonset",
-                        formatSiteTime(
-                            moonset
-                        )
-                    );
+                    astronomyUsnoMoonset =
+                        moonset;
+
+                    updateMoonRiseSet();
 
                     astronomyDateKey =
                         dateKey;
@@ -1261,6 +1488,119 @@ function getMoonPhaseInfo(ageDays) {
     return phases.find(phase => fraction < phase.max) || phases[0];
 }
 
+
+// ============================================================
+// FASES DA LUA — FALLBACK LOCAL
+// ------------------------------------------------------------
+// Contingência quando a USNO não responde. A USNO continua sendo
+// a fonte primária: quando houver resposta dela, os dados da
+// USNO sobrescrevem este cálculo.
+// ============================================================
+
+// Lua Nova de referência: 2000-01-06 18:14 UTC (JD 2451550.1).
+const MOON_REFERENCE_NEW_MOON_JD = 2451550.1;
+
+// Duração média de uma lunação, em dias.
+const SYNODIC_MONTH_DAYS = 29.530588853;
+
+
+function updateMoonEventFallback(
+    selector,
+    label,
+    icon,
+    date
+) {
+
+    const el =
+        container.querySelector(selector);
+
+    if (!el) {
+        return;
+    }
+
+    const labelEl =
+        el.querySelector(".moon-event-label");
+
+    const iconEl =
+        el.querySelector(".moon-event-icon");
+
+    const dateEl =
+        el.querySelector(".moon-event-date");
+
+    if (labelEl) {
+        labelEl.textContent = label;
+    }
+
+    if (iconEl) {
+        iconEl.textContent = icon;
+    }
+
+    if (dateEl) {
+        dateEl.textContent =
+            "em " +
+            formatMoonEventDate(date);
+    }
+}
+
+
+function updateMoonPhaseFallback() {
+
+    const now =
+        new Date();
+
+    let ageDays =
+        (julianDay(now) - MOON_REFERENCE_NEW_MOON_JD) %
+        SYNODIC_MONTH_DAYS;
+
+    if (ageDays < 0) {
+        ageDays += SYNODIC_MONTH_DAYS;
+    }
+
+    const phase =
+        getMoonPhaseInfo(ageDays);
+
+    setText(
+        "moonIcon",
+        phase.icon
+    );
+
+    setText(
+        "moonPhaseName",
+        phase.name
+    );
+
+    setText(
+        "moonAge",
+        ageDays.toFixed(1).replace(".", ",") +
+        " dias"
+    );
+
+    const daysToFull =
+        (
+            (SYNODIC_MONTH_DAYS / 2) -
+            ageDays +
+            SYNODIC_MONTH_DAYS
+        ) %
+        SYNODIC_MONTH_DAYS;
+
+    const daysToNew =
+        (SYNODIC_MONTH_DAYS - ageDays) %
+        SYNODIC_MONTH_DAYS;
+
+    updateMoonEventFallback(
+        "#nextFullMoon",
+        "Lua cheia",
+        "🌕",
+        new Date(now.getTime() + daysToFull * 86400000)
+    );
+
+    updateMoonEventFallback(
+        "#nextNewMoon",
+        "Lua nova",
+        "🌑",
+        new Date(now.getTime() + daysToNew * 86400000)
+    );
+}
 
 
 function updateMoonPhaseDisplay(phases) {
@@ -1482,6 +1822,12 @@ function updateMoonPhasesFromUSNO() {
     if (moonPhaseDateKey === dateKey) {
         return;
     }
+
+    // Novo dia ainda sem dados atualizados da USNO: descarta o
+    // conjunto anterior para que o fallback local assuma até a
+    // USNO responder. Quando a USNO responder, os dados dela
+    // voltam a ter prioridade.
+    moonPhaseLastPhases = null;
 
     moonPhaseRequestInProgress = true;
 
@@ -1714,6 +2060,141 @@ function updateSeasonDisplay() {
 }
 
 
+// ============================================================
+// ESTAÇÕES — FALLBACK LOCAL
+// ------------------------------------------------------------
+// Aproximação pelas fórmulas de Meeus (Astronomical Algorithms,
+// cap. 27). Usado apenas quando a USNO não responde; a USNO
+// continua sendo a fonte primária.
+// ============================================================
+
+function seasonEventFallbackJDE(year, index) {
+
+    // 0 = equinócio de março, 1 = solstício de junho,
+    // 2 = equinócio de setembro, 3 = solstício de dezembro.
+
+    const table = [
+        [2451623.80984, 365242.37404, 0.05169, -0.00411, -0.00057],
+        [2451716.56767, 365241.62603, 0.00325, 0.00888, -0.00030],
+        [2451810.21715, 365242.01767, -0.11575, 0.00337, 0.00078],
+        [2451900.05952, 365242.74049, -0.06223, -0.00823, 0.00032]
+    ];
+
+    const y2 =
+        (year - 2000) / 1000;
+
+    const t =
+        table[index];
+
+    // JDE (Tempo Terrestre). A conversão para instante absoluto
+    // ignora o ΔT (≈ 70 s), irrelevante para exibição ao dia.
+    return (
+        t[0] +
+        t[1] * y2 +
+        t[2] * y2 * y2 +
+        t[3] * y2 * y2 * y2 +
+        t[4] * y2 * y2 * y2 * y2
+    );
+}
+
+
+function buildSeasonEventsFallback(year) {
+
+    const months = [3, 6, 9, 12];
+
+    const events = [];
+
+    for (let i = 0; i < months.length; i++) {
+
+        const season =
+            SOUTH_SEASONS[months[i]];
+
+        if (!season) {
+            continue;
+        }
+
+        events.push({
+            name: season.name,
+            icon: season.icon,
+            date: new Date(
+                (seasonEventFallbackJDE(year, i) - 2440587.5) *
+                86400000
+            )
+        });
+    }
+
+    return events;
+}
+
+
+function updateSeasonFallback() {
+
+    const year =
+        getSiteDateParts().year;
+
+    const events =
+        buildSeasonEventsFallback(year - 1)
+            .concat(buildSeasonEventsFallback(year))
+            .concat(buildSeasonEventsFallback(year + 1));
+
+    if (!events.length) {
+        return;
+    }
+
+    const sorted =
+        events
+            .slice()
+            .sort((a, b) => a.date - b.date);
+
+    const now =
+        new Date();
+
+    const previous =
+        sorted.filter(
+            item => item.date.getTime() <= now.getTime()
+        );
+
+    const current =
+        previous[previous.length - 1];
+
+    const next =
+        sorted.filter(
+            item => item.date.getTime() > now.getTime()
+        )[0];
+
+    const nowIcon =
+        container.querySelector("#seasonNowIcon");
+
+    const nowName =
+        container.querySelector("#seasonNowName");
+
+    const nextIcon =
+        container.querySelector("#seasonNextIcon");
+
+    const nextText =
+        container.querySelector("#seasonNextText");
+
+    if (nowIcon && current) {
+        nowIcon.textContent = current.icon;
+    }
+
+    if (nowName && current) {
+        nowName.textContent = current.name;
+    }
+
+    if (nextIcon && next) {
+        nextIcon.textContent = next.icon;
+    }
+
+    if (nextText && next) {
+        nextText.textContent =
+            next.name +
+            " em " +
+            formatSeasonDate(next.date);
+    }
+}
+
+
 function requestSeasonYear(year) {
 
     if (
@@ -1800,7 +2281,19 @@ function updateSeasonsFromUSNO() {
 
 function updateAstronomy() {
 
+    // Sol: USNO (quando disponível) ou cálculo local.
     updateAstronomyLocalFallback();
+
+    // Lua: critério dependente do momento atual (ver updateMoonRiseSet).
+    updateMoonRiseSet();
+
+    // Fallbacks locais de contingência da fase da Lua e das estações,
+    // usados apenas quando a USNO não responde. A USNO tem
+    // prioridade: quando houver dados dela, eles sobrescrevem
+    // o cálculo local logo abaixo.
+    updateMoonPhaseFallback();
+    updateSeasonFallback();
+
     updateAstronomyFromUSNO();
     updateMoonPhasesFromUSNO();
     updateSeasonsFromUSNO();

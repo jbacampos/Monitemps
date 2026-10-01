@@ -44,7 +44,7 @@ const seasonMock=(year)=>{
 const httpGet=(url)=>({subscribe:(ok,err)=>{
   if(url.includes('/seasons')){const y=Number((url.match(/year=(\d+)/)||[])[1]);ok(seasonMock(y));}
   else if(url.includes('/moon/phases/')) ok({phasedata:phaseData});
-  else ok({properties:{data:{sundata:[{phen:'Rise',time:'06:06'},{phen:'Set',time:'18:27'}],moondata:[{phen:'Rise',time:'23:03'},{phen:'Set',time:'08:18'}]}}});
+  else ok({properties:{data:{sundata:[],moondata:[]}}}); // sem horarios de Sol/Lua: o widget usa o calculo local
 }});
 const ctx={http:{get:httpGet},subscriptionApi:{createSubscription:(options)=>({subscribe:(fn)=>{
   const data=Object.entries(telemetry).map(([name,v])=>({dataKey:{name},datasource:{entityFilter:{singleEntity:{id:'63eaff60-b030-11f1-940d-1f4ee055f09a'}}},data:[[v.timestamp,v.value]]}));
