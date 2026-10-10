@@ -1,0 +1,99 @@
+<div class="card">
+    <div class="controls">
+        <select id="periodSelect" class="period-select" aria-label="Período analisado">
+            <option value="ultimas24h" selected>Últimas 24h</option>
+            <option value="ultimas48h">Últimas 48h</option>
+            <option value="ultimas72h">Últimas 72h</option>
+            <option value="ontem">Ontem</option>
+            <option value="anteontem">Anteontem</option>
+            <option value="ultimos7dias">Últimos 7 dias</option>
+            <option value="semanaanterior">Semana anterior</option>
+            <option value="mesatual">Mês atual</option>
+            <option value="mesanterior">Mês anterior</option>
+            <option value="anoatual">Ano atual</option>
+            <option value="anopassado">Ano passado</option>
+            <option value="anoretrasado">Ano retrasado</option>
+            <option value="desdeoinicio">Desde o início</option>
+        </select>
+    </div>
+
+    <section class="section vento">
+        <div class="section-title">VENTO</div>
+
+        <div class="wind-grid">
+            <div class="wind-block">
+                <div class="block-label">Velocidade do vento</div>
+                <div class="peak-main">
+                    <div class="peak-value-line">
+                        <span id="windSpeedPeak" class="peak-value">--.-</span>
+                        <span class="peak-unit">km/h</span>
+                    </div>
+                    <div id="windSpeedPeakWhen" class="peak-when">--/--- --:--</div>
+                </div>
+                <div id="windSpeedRest" class="peak-list"></div>
+            </div>
+
+            <div class="wind-block">
+                <div class="block-label">Rajadas</div>
+                <div class="peak-main">
+                    <div class="peak-value-line">
+                        <span id="windGustPeak" class="peak-value">--.-</span>
+                        <span class="peak-unit">km/h</span>
+                    </div>
+                    <div id="windGustPeakWhen" class="peak-when">--/--- --:--</div>
+                </div>
+                <div id="windGustRest" class="peak-list"></div>
+            </div>
+        </div>
+
+        <div id="windNote" class="mini-note"></div>
+    </section>
+
+    <section class="section chuva">
+        <div class="section-title">CHUVA</div>
+
+        <div class="rain-total">
+            <div class="rain-total-label">Total no período</div>
+            <div class="rain-total-value">
+                <span id="rainTotal">--.-</span>
+                <span class="item-unit">mm</span>
+            </div>
+            <div id="rainTotalNote" class="rain-total-note"></div>
+        </div>
+
+        <div id="rainRankings" class="rain-rankings"></div>
+        <div id="rainNote" class="mini-note"></div>
+    </section>
+
+    <div class="last-update-row">
+        <button id="helpButton" class="help-button" title="Ajuda">ⓘ</button>
+        <div id="lastUpdate" class="last-update">Dados: --/--- --:--</div>
+        <button id="refreshButton" class="refresh-button" title="Atualizar">↻</button>
+    </div>
+
+    <div id="helpOverlay" class="help-overlay" hidden>
+        <div class="help-box">
+            <button id="helpClose" class="help-close" title="Fechar">×</button>
+            <div class="help-title">MÁXIMOS E TOTAIS</div>
+            <div class="help-list">
+                <div class="help-text">
+                    <strong>Vento e rajadas:</strong> até três picos distintos, com
+                    separação mínima de 24 horas entre os horários escolhidos. Um
+                    mesmo episódio prolongado pode gerar dois picos se durar mais
+                    de 24 horas.
+                </div>
+                <div class="help-text">
+                    <strong>Chuva:</strong> acumulados obtidos pelos incrementos do
+                    contador do pluviômetro WH40H. Quedas do contador
+                    (reinicializações ou ajustes) não são contadas como chuva.
+                </div>
+                <div class="help-text">
+                    <strong>Incerteza:</strong> dias marcados com <span class="unc">≈</span>
+                    têm atribuição temporal incerta por lacuna de coleta ou
+                    reinicialização do contador. O total recuperável é preservado,
+                    mas não é apresentado como exato.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

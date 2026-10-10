@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoniTemps — máximos e totais (preview local)</title>
+<style>
+html,body{margin:0;min-height:100%;background:#202328;color:#eee;font-family:Inter,Arial,sans-serif}
+body{padding:20px;box-sizing:border-box}
+.preview-header{margin:0 0 10px;font-size:13px;color:#c8ccd1}
+#widget{width:min(100%,560px);height:760px;margin:auto;border-radius:8px;overflow:hidden}
+.preview-tools{margin:10px 0 0;font-size:12px;color:#c8ccd1;text-align:center}
+</style>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="preview-header">MoniTemps — máximos e totais (preview local, dados simulados)</div>
+<div id="widget"></div>
+<div class="preview-tools">Use o seletor no topo do widget para alternar entre os 13 períodos.</div>
+
+<script>
+// ------------------------------------------------------------
+// Ambiente de teste (NÃO faz parte do widget). Simula container,
+// ctx e o dispositivo Ecowitt (vento, rajadas e chuva).
+// ------------------------------------------------------------
+const container = document.getElementById("widget");
+window.container = container;
+
+const NOW = Date.now();
+const MIN = 60000;
+const H = 3600000;
+const DAY = 86400000;
+const RANGE_START = NOW - 45 * DAY;
+
+// LCG determinístico para dados reprodutíveis.
+let seed = 1234567;
+function rnd() {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+}
+
+function buildDevice() {
+    const wind = [];
+    const gust = [];
+    const rain = [];
+    const rainDay = [];
+
+    // Janelas de tempestade (dias atrás) e de chuva.
+    const storms = [1.5, 12, 28, 40];
+    const rainPeriods = [[40.5, 39.8, 12], [12.2, 11.4, 9], [3.2, 2.8, 6]];
+    const resetAt = NOW - 15 * DAY;      // reinicialização do contador
+    const gapStart = NOW - 3 * DAY;      // lacuna de coleta de 8 h
+    const gapEnd = gapStart + 8 * H;
+
+    let rainTotal = 20.0;
+    let rainToday = 0;
+
+    for (let ts = RANGE_START; ts <= NOW; ts += MIN) {
+        // Lacuna de coleta: simplesmente não gera amostras.
+        if (ts >= gapStart && ts < gapEnd) {
+            continue;
+        }
+
+        const dayAgo = (NOW - ts) / DAY;
+
+        // Vento base + rajadas nas tempestades.
+        let base = 3 + 6 * Math.abs(Math.sin(ts / (7 * H)));
+        let gBase = base + 2 + 4 * Math.abs(Math.sin(ts / (5 * H)));
+
+        storms.forEach(function (d) {
+            const dist = Math.abs(dayAgo - d);
+            if (dist < 0.25) {
+                const k = 1 - dist / 0.25;
+                base += 55 * k;
+                gBase += 78 * k;
+            }
+        });
+
+        wind.push([ts, Math.round((base + 3 * rnd()) * 100) / 100]);
+        gust.push([ts, Math.round((gBase + 4 * rnd()) * 100) / 100]);
+
+        // Chuva: incrementos durante os períodos de chuva.
+        let inc = 0;
+        rainPeriods.forEach(function (p) {
+            if (dayAgo <= p[0] && dayAgo >= p[1]) {
+                inc += p[2] / ((p[0] - p[1]) * 24 * 60) * (rnd() < 0.3 ? 1 : 0.2);
+            }
+        });
+
+        if (inc > 0) {
+            rainTotal += inc;
+            rainToday += inc;
+        }
+
+        // Reinicialização do contador (zera).
+        if (Math.abs(ts - resetAt) < MIN / 2) {
+            rainTotal = 0;
+            rainToday = 0;
+        }
+
+        rain.push([ts, Math.round(rainTotal * 100) / 100]);
+        rainDay.push([ts, Math.round(rainToday * 100) / 100]);
+
+        // rain_day zera à meia-noite local do Sítio.
+        const local = new Date(ts - 3 * H);
+        if (local.getUTCHours() === 0 && local.getUTCMinutes() === 0) {
+            rainToday = 0;
+        }
+    }
+
+    return { wind_speed: wind, wind_gust: gust, rain_total: rain, rain_day: rainDay };
+}
+
+const DEVICE = buildDevice();
+
+function keyFromUrl(url) {
+    const m = /keys=([^&]+)/.exec(url);
+    return m ? decodeURIComponent(m[1]) : null;
+}
+
+function numParam(url, name) {
+    const m = new RegExp(name + "=(-?\\d+)").exec(url);
+    return m ? Number(m[1]) : null;
+}
+
+window.ctx = {
+    http: {
+        get: function (url) {
+            return {
+                subscribe: function (ok) {
+                    const key = keyFromUrl(url);
+                    const start = numParam(url, "startTs");
+                    const end = numParam(url, "endTs");
+                    const limit = numParam(url, "limit") || 1000;
+                    const order = (/orderBy=(\w+)/.exec(url) || [])[1] || "DESC";
+                    const asc = order.toUpperCase() === "ASC";
+                    const src = DEVICE[key] || [];
+                    const out = [];
+
+                    const lo = start === null ? -Infinity : start;
+                    const hi = end === null ? Infinity : end;
+
+                    if (asc) {
+                        for (let i = 0; i < src.length && out.length < limit; i++) {
+                            if (src[i][0] >= lo && src[i][0] <= hi) {
+                                out.push({ ts: src[i][0], value: String(src[i][1]) });
+                            }
+                        }
+                    } else {
+                        for (let i = src.length - 1; i >= 0 && out.length < limit; i--) {
+                            if (src[i][0] >= lo && src[i][0] <= hi) {
+                                out.push({ ts: src[i][0], value: String(src[i][1]) });
+                            }
+                        }
+                    }
+
+                    const resp = {};
+                    resp[key] = out;
+                    ok(resp);
+                    return { unsubscribe: function () {} };
+                }
+            };
+        }
+    },
+    subscriptionApi: {
+        createSubscription: function () {
+            return { subscribe: function (fn) { fn({ data: [] }); return { unsubscribe: function () {} }; } };
+        }
+    },
+    registerDestroyCallback: function () {}
+};
+
+window.__errors = [];
+window.onerror = function (m) { window.__errors.push(String(m)); };
+
+function loadWidget() {
+    fetch("index.html").then(function (r) { return r.text(); }).then(function (html) {
+        container.innerHTML = html;
+
+        // Permite validar um período específico via ?period=<id>.
+        const m = /[?&]period=([a-z0-9]+)/i.exec(location.search);
+        if (m) {
+            const sel = container.querySelector("#periodSelect");
+            if (sel) { sel.value = m[1]; }
+        }
+
+        const s = document.createElement("script");
+        s.src = "script.js";
+        s.onload = function () {
+            // Snapshot do texto renderizado (verificação automática).
+            setTimeout(function () {
+                try {
+                    navigator.sendBeacon("/__result", JSON.stringify({
+                        preview: true,
+                        text: container.innerText,
+                        errors: window.__errors
+                    }));
+                } catch (e) { /* ignora */ }
+            }, 2500);
+        };
+        document.body.appendChild(s);
+    });
+}
+
+loadWidget();
+</script>
+</body>
+</html>
+

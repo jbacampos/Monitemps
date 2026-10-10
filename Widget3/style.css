@@ -1,0 +1,323 @@
+/* ============================================================
+   WIDGET SÍTIO — MÁXIMOS E TOTAIS METEOROLÓGICOS
+   Mesma identidade visual dos widgets existentes do MoniTemps.
+   ============================================================ */
+
+.card {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    padding: 12px 18px 8px 18px;
+    background: #292c32;
+    color: #eeeeee;
+    font-family: Inter, Arial, sans-serif;
+    overflow: hidden;
+}
+
+.section { width: 100%; box-sizing: border-box; }
+
+.section-title {
+    text-align: center;
+    font-size: 22px;
+    line-height: 26px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #c5cbd4;
+    margin-bottom: 8px;
+}
+
+/* ---------------- Controles (seletor de período) ---------------- */
+
+.controls {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.period-select {
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 18px;
+    color: #e5e7ea;
+    background: #34383f;
+    border: 1px solid #4a4e55;
+    border-radius: 6px;
+    padding: 5px 8px;
+    cursor: pointer;
+}
+
+.period-select:focus-visible {
+    outline: 2px solid #3182f6;
+    outline-offset: 1px;
+}
+
+/* ---------------- VENTO ---------------- */
+
+.vento { padding-bottom: 20px; }
+
+.wind-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    box-sizing: border-box;
+}
+
+.wind-block {
+    min-width: 0;
+    text-align: center;
+    box-sizing: border-box;
+    padding: 0 14px;
+}
+
+.wind-block + .wind-block { border-left: 1px solid #555960; }
+
+.block-label {
+    font-size: 14px;
+    line-height: 18px;
+    font-weight: 500;
+    color: #c5cbd4;
+    margin-bottom: 4px;
+}
+
+.peak-value-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+}
+
+.peak-value {
+    font-size: 40px;
+    line-height: 44px;
+    font-weight: 500;
+    color: #9bc53d;
+}
+
+.peak-unit { font-size: 14px; font-weight: 400; color: #9bc53d; margin-left: 4px; }
+
+.peak-when {
+    font-size: 13px;
+    line-height: 18px;
+    color: #969ba3;
+    margin-bottom: 6px;
+}
+
+.peak-list { display: flex; flex-direction: column; gap: 3px; }
+
+.peak-row {
+    display: grid;
+    grid-template-columns: 22px 1fr auto;
+    align-items: baseline;
+    column-gap: 6px;
+    font-size: 13px;
+    line-height: 17px;
+}
+
+.peak-row .peak-pos { color: #969ba3; text-align: left; }
+.peak-row .peak-v { color: #9bc53d; text-align: right; font-variant-numeric: tabular-nums; }
+.peak-row .peak-t { color: #969ba3; text-align: right; white-space: nowrap; }
+
+.peak-empty {
+    font-size: 13px;
+    line-height: 17px;
+    color: #969ba3;
+    padding: 2px 0;
+}
+
+/* ---------------- CHUVA ---------------- */
+
+.chuva {
+    padding-top: 6px;
+    border-top: 1px solid #555960;
+}
+
+.rain-total {
+    text-align: center;
+    margin-bottom: 10px;
+}
+
+.rain-total-label {
+    font-size: 14px;
+    line-height: 18px;
+    color: #c5cbd4;
+    margin-bottom: 2px;
+}
+
+.rain-total-value {
+    font-size: 34px;
+    line-height: 38px;
+    font-weight: 500;
+    color: #9bc53d;
+}
+
+.rain-total-note {
+    font-size: 12px;
+    line-height: 16px;
+    color: #969ba3;
+}
+
+.rain-rankings {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    box-sizing: border-box;
+}
+
+.rank-block {
+    min-width: 0;
+    box-sizing: border-box;
+    padding: 0 12px;
+}
+
+.rank-block + .rank-block { border-left: 1px solid #555960; }
+
+.rank-title {
+    text-align: center;
+    font-size: 13px;
+    line-height: 17px;
+    font-weight: 500;
+    color: #c5cbd4;
+    margin-bottom: 4px;
+}
+
+.rank-row {
+    display: grid;
+    grid-template-columns: 20px 1fr auto;
+    align-items: baseline;
+    column-gap: 6px;
+    font-size: 13px;
+    line-height: 17px;
+}
+
+.rank-row .rank-pos { color: #969ba3; }
+.rank-row .rank-name { color: #e5e7ea; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rank-row .rank-v { color: #9bc53d; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.rank-empty { font-size: 12px; color: #969ba3; }
+
+.unc { color: #eab308; font-weight: 700; }
+
+.mini-note {
+    font-size: 11px;
+    line-height: 15px;
+    color: #969ba3;
+    margin-top: 6px;
+}
+
+.mini-note:empty { display: none; }
+
+/* ---------------- Rodapé / ajuda ---------------- */
+
+.last-update-row {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    bottom: 4px;
+    display: grid;
+    grid-template-columns: 34px 1fr 34px;
+    align-items: center;
+    height: 26px;
+}
+
+.last-update {
+    text-align: center;
+    font-size: 11px;
+    line-height: 14px;
+    color: #969ba3;
+}
+
+.last-update.atrasado { color: #ef4444; }
+
+.help-button,
+.refresh-button {
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #969ba3;
+    font-size: 20px;
+    line-height: 26px;
+    cursor: pointer;
+}
+
+.refresh-button:disabled { opacity: 0.4; cursor: default; }
+
+.help-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(20, 22, 26, 0.82);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+    z-index: 5;
+}
+
+.help-box {
+    position: relative;
+    max-width: 420px;
+    background: #34383f;
+    border: 1px solid #4a4e55;
+    border-radius: 8px;
+    padding: 16px 18px;
+}
+
+.help-title {
+    text-align: center;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    color: #c5cbd4;
+    margin-bottom: 10px;
+}
+
+.help-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    border: 0;
+    background: transparent;
+    color: #969ba3;
+    font-size: 20px;
+    line-height: 20px;
+    cursor: pointer;
+}
+
+.help-list { display: flex; flex-direction: column; gap: 8px; }
+
+.help-text { font-size: 12px; line-height: 17px; color: #e5e7ea; }
+.help-text strong { color: #9bc53d; }
+
+/* ============================================================
+   RESPONSIVIDADE (classes aplicadas pelo JS — o ThingsBoard
+   achata @media, por isso o layout é controlado por classe).
+   ============================================================ */
+
+.card--xs .section-title { font-size: 20px; line-height: 24px; }
+.card--xs .peak-value { font-size: 34px; line-height: 38px; }
+.card--xs .wind-block { padding: 0 8px; }
+.card--xs .rank-block { padding: 0 7px; }
+.card--xs .rank-row, .card--xs .peak-row { font-size: 12px; line-height: 16px; }
+
+.card--xxs .wind-grid { grid-template-columns: 1fr; }
+.card--xxs .wind-block + .wind-block {
+    border-left: 0;
+    border-top: 1px solid #555960;
+    margin-top: 8px;
+    padding-top: 8px;
+}
+.card--xxs .rain-rankings { grid-template-columns: 1fr; }
+.card--xxs .rank-block + .rank-block {
+    border-left: 0;
+    border-top: 1px solid #555960;
+    margin-top: 8px;
+    padding-top: 8px;
+}
+.card--xxs .peak-value { font-size: 30px; line-height: 34px; }
+.card--xxs .rain-total-value { font-size: 28px; line-height: 32px; }
+
+.card--short .vento { padding-bottom: 12px; }
+.card--short .section-title { margin-bottom: 4px; }
+.card--short .peak-when { margin-bottom: 3px; }
+.card--short .rain-total { margin-bottom: 6px; }

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Widget3 — testes</title>
+</head>
+<body>
+<div id="widget"></div>
+<pre id="out">running</pre>
+
+<script>
+// ------------------------------------------------------------
+// Harness de teste (NÃO faz parte do widget).
+// Stubs mínimos de container/ctx para carregar script.js e
+// exercitar as funções puras com dados sintéticos e reais.
+// ------------------------------------------------------------
+window.__errors = [];
+window.onerror = function (msg) {
+    window.__errors.push(String(msg));
+};
+
+const container = document.getElementById("widget");
+container.clientWidth = 600;
+container.clientHeight = 720;
+window.container = container;
+
+window.ctx = {
+    http: {
+        get: function () {
+            return { subscribe: function (ok) { ok({}); return { unsubscribe() {} }; } };
+        }
+    },
+    subscriptionApi: {
+        createSubscription: function () {
+            return { subscribe: function (fn) { fn({}); return { unsubscribe() {} }; } };
+        }
+    },
+    registerDestroyCallback: function () {}
+};
+
+window.__resultUrl = "/__result";
+</script>
+
+<script src="script.js"></script>
+<script src="_realdata.js" onerror="void 0"></script>
+<script src="_tests.js"></script>
+</body>
+</html>

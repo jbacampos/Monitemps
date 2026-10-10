@@ -1,0 +1,7 @@
+.vscode/
+*.log
+*.zip
+
+# Artefatos de teste (gerados; não versionar)
+_realdata.js
+_test_result.json
