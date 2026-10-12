@@ -44,6 +44,8 @@ function buildDevice() {
     const gust = [];
     const rain = [];
     const rainDay = [];
+    const temp = [];
+    const feels = [];
 
     // Janelas de tempestade (dias atrás) e de chuva.
     const storms = [1.5, 12, 28, 40];
@@ -79,6 +81,14 @@ function buildDevice() {
         wind.push([ts, Math.round((base + 3 * rnd()) * 100) / 100]);
         gust.push([ts, Math.round((gBase + 4 * rnd()) * 100) / 100]);
 
+        // Temperatura externa (ciclo diurno determinístico, sem rnd para
+        // não alterar as séries já simuladas) e sensação térmica.
+        const localFrac = (((ts - 3 * H) % DAY) + DAY) % DAY / DAY;
+        const dayAdj = 2 * Math.sin(Math.floor((ts - 3 * H) / DAY) * 1.7);
+        const tOut = 18 - 8 * Math.cos(2 * Math.PI * (localFrac - 0.1)) + dayAdj;
+        temp.push([ts, Math.round(tOut * 100) / 100]);
+        feels.push([ts, Math.round((tOut - 1.5) * 100) / 100]);
+
         // Chuva: incrementos durante os períodos de chuva.
         let inc = 0;
         rainPeriods.forEach(function (p) {
@@ -108,7 +118,10 @@ function buildDevice() {
         }
     }
 
-    return { wind_speed: wind, wind_gust: gust, rain_total: rain, rain_day: rainDay };
+    return {
+        wind_speed: wind, wind_gust: gust, rain_total: rain, rain_day: rainDay,
+        temperature_out: temp, feels_like_out: feels
+    };
 }
 
 const DEVICE = buildDevice();

@@ -3,6 +3,9 @@
 // ------------------------------------------------------------
 // Consulta o histórico do dispositivo Ecowitt (Sítio) no
 // ThingsBoard e apresenta:
+//   • TEMPERATURA : 3 maiores e 3 menores de temperatura externa
+//              (separação mínima de 24 h), com a sensação térmica do
+//              mesmo instante exibida como "ST".
 //   • VENTO  : até 3 picos de velocidade e de rajada, com
 //              separação mínima de 24 h entre os horários.
 //   • CHUVA  : total do período e rankings de dias / semanas /
@@ -30,9 +33,36 @@ const WEEK_START = 0;
 const PEAK_MIN_GAP_MS = 24 * 3600 * 1000;
 const PEAK_TOP_N = 3;
 
+// Temperatura: telemetria classificada (temperature_out) e a complementar
+// (feels_like_out, exibida como "ST" no mesmo instante). Nº de extremos por
+// categoria e janela mínima entre ocorrências (mesmo princípio dos picos de
+// vento, aplicado às OCORRÊNCIAS).
+const TEMP_KEY = "temperature_out";
+const TEMP_FEELS_KEY = "feels_like_out";
+const TEMP_TOP_N = 3;
+const TEMP_MIN_GAP_MS = 24 * 3600 * 1000;
+
+// As séries temperature_out e feels_like_out compartilham os timestamps
+// (verificado no dispositivo real). Ainda assim aceita-se a amostra de
+// sensação térmica mais próxima dentro desta tolerância (= GAP_TOLERANCE_MS,
+// ~3× a cadência); fora dela NÃO se associa (exibe "ST —").
+const TEMP_ST_TOLERANCE_MS = 3 * 60 * 1000;
+
 // Agregação grosseira (somente seleção de candidatos a pico).
 const COARSE_INTERVAL_MS = 3600 * 1000; // 1 hora
-const COARSE_TOP_K = 12;                // nº de buckets candidatos
+const COARSE_TOP_K = 12;                // nº de candidatos (espalhados)
+
+// Restrições REAIS medidas na API do ThingsBoard (datalog.top):
+//   • uma consulta agregada é REJEITADA acima de ~700 intervalos
+//     (701 intervalos de 1 h -> HTTP 400 "Number of intervals is to high");
+//   • o intervalo pode ser qualquer múltiplo (2 h, 8 h, ...);
+//   • a leitura crua aceita limit >= 4000 (até 60000 nesta instância).
+// Por isso a janela agregada é dividida em sub-janelas contíguas de, no
+// máximo, AGG_MAX_INTERVALS intervalos, e todos os buckets são consolidados.
+const AGG_MAX_INTERVALS = 500;          // intervalos por consulta (< 700 medido)
+const AGG_MAX_REQUESTS = 20;            // teto de sub-consultas por chave
+const AGG_PAGE_LIMIT = 5000;            // limite de buckets por resposta
+const RAW_REFINE_PAGES = 4;             // páginas cruas por candidato
 
 // Lacuna de coleta: intervalo entre amostras acima disso torna a
 // atribuição temporal incerta (não é redistribuída).
@@ -397,6 +427,30 @@ function fetchFirstTs(key, endTs) {
     });
 }
 
+// Amostra IMEDIATAMENTE anterior a `beforeTs` (estritamente < beforeTs).
+// Necessária para medir o incremento da 1ª amostra dentro da janela, que
+// de outra forma seria perdido em `computeRain`.
+function fetchPrevSample(key, beforeTs) {
+    const url = telemetryUrl(key, 0, beforeTs - 1, "limit=1&orderBy=DESC");
+
+    return httpGetJson(url).then(function (response) {
+        const arr = (response && response[key]) || [];
+
+        if (!arr.length) {
+            return null;
+        }
+
+        const ts = Number(arr[0].ts);
+        const value = Number(arr[0].value);
+
+        if (!Number.isFinite(ts) || !Number.isFinite(value)) {
+            return null;
+        }
+
+        return { ts: ts, value: value };
+    });
+}
+
 // ============================================================
 // PICOS DE VENTO (>= 24 h de separação)
 // ------------------------------------------------------------
@@ -434,43 +488,346 @@ function selectPeaks(points, minGapMs, topN) {
     });
 }
 
+// ============================================================
+// EXTREMOS DE TEMPERATURA (máximas / mínimas)
+// ------------------------------------------------------------
+// Classificação EXCLUSIVA por temperature_out. feels_like_out é apenas
+// complementar (exibida como "ST" no instante do extremo) e NÃO participa
+// da classificação.
+//
+// Critério de "ocorrência distinta" (temperature_out):
+//   • amostras CONSECUTIVAS (intervalo <= GAP_TOLERANCE_MS) com o MESMO
+//     valor exibido (0,1 °C) formam um único patamar = UMA ocorrência,
+//     datada na 1ª amostra. Uma lacuna de coleta separa patamares.
+//   • O MESMO valor PODE reaparecer em OUTRA ocorrência temporal.
+//   • Máximas ordenadas por temperatura DECRESCENTE; mínimas CRESCENTE;
+//     empate -> horário MAIS ANTIGO. Não se inventam valores/horários.
+//
+// Seleção: separação temporal mínima de TEMP_MIN_GAP_MS (24 h) aplicada
+// SEPARADAMENTE a máximas e a mínimas — mesmo princípio dos picos de vento,
+// porém sobre as OCORRÊNCIAS. (Não reutiliza `selectPeaks`: ele ordena
+// apenas de forma decrescente e não trata mínimas.) Mostra até `topN`
+// ocorrências e NÃO preenche posições inexistentes.
+// Janela [startTs, endTs): início inclusivo, fim exclusivo.
+// ============================================================
+
+// Valor de sensação térmica no MESMO instante `ts`:
+//   • amostra exata -> esse valor;
+//   • senão, a amostra mais próxima dentro de `tolMs`;
+//   • senão null (o render exibe "ST —").
+function feelsAtInstant(feelsTs, feelsByTs, ts, tolMs) {
+    if (feelsByTs.has(ts)) {
+        return feelsByTs.get(ts);
+    }
+    if (!feelsTs.length) {
+        return null;
+    }
+
+    let lo = 0;
+    let hi = feelsTs.length - 1;
+
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (feelsTs[mid] < ts) { lo = mid + 1; } else { hi = mid - 1; }
+    }
+
+    let best = null;
+    let bestDiff = Infinity;
+
+    [lo, lo - 1].forEach(function (idx) {
+        if (idx < 0 || idx >= feelsTs.length) { return; }
+        const diff = Math.abs(feelsTs[idx] - ts);
+        if (diff < bestDiff) { bestDiff = diff; best = feelsTs[idx]; }
+    });
+
+    return (best != null && bestDiff <= tolMs) ? feelsByTs.get(best) : null;
+}
+
+function selectTempExtremes(tempPoints, feelsPoints, topN, minGapMs, startTs, endTs) {
+    const n = topN || TEMP_TOP_N;
+    const gap = minGapMs || TEMP_MIN_GAP_MS;
+
+    // 1) Ocorrências de temperature_out (patamares de 0,1 °C).
+    const inWin = tempPoints.filter(function (p) {
+        return (startTs == null || p.ts >= startTs) &&
+            (endTs == null || p.ts < endTs);
+    }).sort(function (a, b) { return a.ts - b.ts; });
+
+    const occ = [];
+    let prevTs = null;
+
+    inWin.forEach(function (p) {
+        const v = Math.round(p.value * 10) / 10;
+        const last = occ[occ.length - 1];
+        const adjacent = prevTs != null && (p.ts - prevTs) <= GAP_TOLERANCE_MS;
+
+        if (!(last && last.value === v && adjacent)) {
+            occ.push({ ts: p.ts, value: v });
+        }
+
+        prevTs = p.ts;
+    });
+
+    // 2) Sensação térmica no mesmo instante (exata ou dentro da tolerância).
+    const feelsByTs = new Map();
+    const feelsTs = [];
+
+    (feelsPoints || []).forEach(function (p) {
+        if (!feelsByTs.has(p.ts)) {
+            feelsByTs.set(p.ts, Math.round(p.value * 10) / 10);
+            feelsTs.push(p.ts);
+        }
+    });
+
+    feelsTs.sort(function (a, b) { return a - b; });
+
+    occ.forEach(function (o) {
+        o.st = feelsAtInstant(feelsTs, feelsByTs, o.ts, TEMP_ST_TOLERANCE_MS);
+    });
+
+    // 3) Seleção com separação temporal (mesmo princípio dos picos de vento).
+    function select(sortedOcc) {
+        const chosen = [];
+
+        for (let i = 0; i < sortedOcc.length && chosen.length < n; i++) {
+            const c = sortedOcc[i];
+            let ok = true;
+
+            for (let j = 0; j < chosen.length; j++) {
+                if (Math.abs(chosen[j].ts - c.ts) < gap) { ok = false; break; }
+            }
+
+            if (ok) { chosen.push(c); }
+        }
+
+        return chosen;
+    }
+
+    const maxs = select(occ.slice().sort(function (a, b) {
+        return (b.value - a.value) || (a.ts - b.ts);
+    }));
+
+    const mins = select(occ.slice().sort(function (a, b) {
+        return (a.value - b.value) || (a.ts - b.ts);
+    }));
+
+    return { maxs: maxs, mins: mins, count: occ.length };
+}
+
+// Espalha os candidatos a pico pela janela. Aplica aos buckets agregados o
+// MESMO critério de separação mínima usado no ranking final, de modo que a
+// seleção não fique concentrada em um único episódio de vento e cubra toda
+// a janela. A escolha continua sendo pelos maiores valores.
+function selectSpreadCandidates(buckets, minGapMs, maxCount) {
+    const sorted = buckets.slice().sort(function (a, b) {
+        return (b.value - a.value) || (a.ts - b.ts);
+    });
+
+    const chosen = [];
+
+    for (let i = 0; i < sorted.length && chosen.length < maxCount; i++) {
+        const b = sorted[i];
+        let ok = true;
+
+        for (let j = 0; j < chosen.length; j++) {
+            if (Math.abs(chosen[j].ts - b.ts) < minGapMs) {
+                ok = false;
+                break;
+            }
+        }
+
+        if (ok) {
+            chosen.push(b);
+        }
+    }
+
+    return chosen;
+}
+
+// Intervalo de agregação adaptativo: o menor múltiplo de 1 h que faça a
+// janela caber em AGG_MAX_INTERVALS * AGG_MAX_REQUESTS buckets, respeitando
+// o limite de intervalos por consulta e o teto de sub-consultas.
+function chooseAggInterval(windowMs) {
+    const maxBuckets = AGG_MAX_INTERVALS * AGG_MAX_REQUESTS;
+    const hours = Math.ceil(windowMs / COARSE_INTERVAL_MS);
+
+    if (hours <= maxBuckets) {
+        return COARSE_INTERVAL_MS;
+    }
+
+    return Math.ceil(hours / maxBuckets) * COARSE_INTERVAL_MS;
+}
+
+// Divide [startTs, endTs) em sub-janelas CONTÍGUAS com, no máximo,
+// maxIntervals intervalos cada. `capped` indica que o teto de sub-consultas
+// foi atingido e a cobertura temporal ficaria incompleta.
+function planAggWindows(startTs, endTs, interval, maxIntervals, maxRequests) {
+    const span = Math.max(1, interval) * Math.max(1, maxIntervals);
+    const windows = [];
+    let cursor = startTs;
+    let capped = false;
+
+    while (cursor < endTs) {
+        if (windows.length >= maxRequests) {
+            capped = true;
+            break;
+        }
+
+        const end = Math.min(endTs, cursor + span);
+        windows.push({ start: cursor, end: end });
+        cursor = end;
+    }
+
+    return { windows: windows, capped: capped };
+}
+
+// Deduplica buckets por timestamp mantendo o MAIOR valor (agregação MAX).
+function dedupeTsKeepMax(points) {
+    const map = new Map();
+
+    points.forEach(function (p) {
+        const cur = map.get(p.ts);
+
+        if (cur === undefined || p.value > cur.value) {
+            map.set(p.ts, p);
+        }
+    });
+
+    return Array.from(map.values()).sort(function (a, b) { return a.ts - b.ts; });
+}
+
+// Leitura agregada paginada de UMA sub-janela. A paginação evita perder
+// buckets quando a resposta atinge o limite de linhas.
+function fetchAggPaged(key, startTs, endTs, interval, agg, pageLimit) {
+    const limit = pageLimit || AGG_PAGE_LIMIT;
+    const collected = [];
+    let cursor = startTs;
+    let page = 0;
+    let capped = false;
+
+    function next() {
+        if (page >= 400) {              // guarda contra laço infinito
+            capped = true;
+            return Promise.resolve();
+        }
+
+        return fetchAgg(key, cursor, endTs, interval, agg, limit)
+            .then(function (buckets) {
+                if (!buckets.length) {
+                    return;
+                }
+
+                buckets.forEach(function (b) {
+                    if (b.ts >= startTs && b.ts <= endTs) {
+                        collected.push(b);
+                    }
+                });
+
+                page++;
+
+                const last = buckets[buckets.length - 1].ts;
+
+                if (buckets.length < limit || last >= endTs) {
+                    return;
+                }
+
+                if (last + 1 <= cursor) { // sem progresso
+                    capped = true;
+                    return;
+                }
+
+                cursor = last + 1;
+                return next();
+            });
+    }
+
+    return next().then(function () {
+        return { buckets: dedupeTsKeepMax(collected), capped: capped };
+    });
+}
+
+// Consolida TODOS os buckets de [startTs, endTs) para uma chave, dividindo
+// a janela em sub-janelas (limite de intervalos da API). Não trunca a
+// cobertura em silêncio: se a API rejeitar, se uma página não avançar ou se
+// o teto de sub-consultas for atingido, devolve capped=true.
+function fetchAggWindow(key, startTs, endTs, interval, agg, maxRequests) {
+    const plan = planAggWindows(startTs, endTs, interval,
+        AGG_MAX_INTERVALS, maxRequests || AGG_MAX_REQUESTS);
+    const all = [];
+    let capped = plan.capped;
+
+    function step(i) {
+        if (i >= plan.windows.length) {
+            return Promise.resolve();
+        }
+
+        const w = plan.windows[i];
+
+        return fetchAggPaged(key, w.start, w.end, interval, agg)
+            .then(function (r) {
+                r.buckets.forEach(function (b) { all.push(b); });
+
+                if (r.capped) {
+                    capped = true;      // cobertura desta sub-janela incompleta
+                    return;
+                }
+
+                return step(i + 1);
+            })
+            .catch(function () {
+                // Rejeição da API (ex.: limite de intervalos): preserva o
+                // que já foi obtido e sinaliza que a resposta é incompleta.
+                capped = true;
+            });
+    }
+
+    return step(0).then(function () {
+        return { buckets: dedupeTsKeepMax(all), capped: capped };
+    });
+}
+
 // Seleciona os picos de uma chave dentro de [startTs, endTs].
 //   1) Leitura crua quando o volume cabe no teto -> exata.
-//   2) Caso contrário: agregação MAX horária para escolher K
-//      buckets candidatos e REFINO cru em
-//      [bucket - 1h, bucket + 2h) — a semântica do timestamp do
-//      bucket não é assumida (cobre início ou fim de bucket).
-// Devolve { peaks, method }.
+//   2) Caso contrário: agregação MAX sobre a janela COMPLETA (dividida em
+//      sub-janelas), candidatos ESPALHADOS (>= 24 h) e REFINO cru em
+//      [bucket - i, bucket + 2i) — a semântica do timestamp do bucket não
+//      é assumida (cobre início ou fim de bucket).
+// Devolve { peaks, method, limited }.
 function findTopPeaks(key, startTs, endTs, log) {
     // Estimativa de amostras (cadência medida ~60 s). Se a janela
-    // inteira caber no teto de leitura crua, calcula de forma
-    // exata; caso contrário usa a agregação sobre a janela COMPLETA
-    // (a paginação crua é do mais recente para o mais antigo e
-    // poderia ignorar picos antigos).
+    // inteira caber no teto de leitura crua, calcula de forma exata;
+    // caso contrário usa a agregação sobre a janela COMPLETA.
     const estimate = Math.ceil((endTs - startTs) / 60000);
     const rawFits = estimate <= RAW_MAX_PAGES * RAW_PAGE_LIMIT * 0.8;
 
-    function finalize(points, method) {
+    function finalize(points, method, limited) {
         return {
             peaks: selectPeaks(points, PEAK_MIN_GAP_MS, PEAK_TOP_N),
-            method: method
+            method: method,
+            limited: !!limited
         };
     }
 
     function aggregatedPath() {
-        log("Agregação (seleção de candidatos) para " + key);
+        const interval = chooseAggInterval(endTs - startTs);
 
-        return fetchAgg(key, startTs, endTs, COARSE_INTERVAL_MS, "MAX")
-            .then(function (buckets) {
-                const top = buckets.slice().sort(function (a, b) {
-                    return (b.value - a.value) || (a.ts - b.ts);
-                }).slice(0, COARSE_TOP_K);
+        log("Agregação (candidatos) para " + key + " — intervalo " +
+            (interval / COARSE_INTERVAL_MS) + " h, janela dividida");
 
-                const jobs = top.map(function (b) {
+        return fetchAggWindow(key, startTs, endTs, interval, "MAX", AGG_MAX_REQUESTS)
+            .then(function (agg) {
+                const candidates = selectSpreadCandidates(
+                    agg.buckets, PEAK_MIN_GAP_MS, COARSE_TOP_K);
+
+                if (!candidates.length) {
+                    return finalize([], "aggregated", agg.capped);
+                }
+
+                const jobs = candidates.map(function (b) {
                     return fetchRaw(key,
-                        Math.max(startTs, b.ts - COARSE_INTERVAL_MS),
-                        Math.min(endTs, b.ts + 2 * COARSE_INTERVAL_MS),
-                        4).then(function (r) { return r.points; });
+                        Math.max(startTs, b.ts - interval),
+                        Math.min(endTs, b.ts + 2 * interval),
+                        RAW_REFINE_PAGES).then(function (r) { return r.points; });
                 });
 
                 return Promise.all(jobs).then(function (lists) {
@@ -480,7 +837,7 @@ function findTopPeaks(key, startTs, endTs, log) {
                         pts.forEach(function (p) { all.push(p); });
                     });
 
-                    return finalize(dedupeSortAsc(all), "aggregated");
+                    return finalize(dedupeSortAsc(all), "aggregated", agg.capped);
                 });
             });
     }
@@ -493,7 +850,7 @@ function findTopPeaks(key, startTs, endTs, log) {
         if (raw.capped) {
             return aggregatedPath();
         }
-        return finalize(raw.points, "raw");
+        return finalize(raw.points, "raw", false);
     });
 }
 
@@ -546,6 +903,60 @@ function renderWind(prefix, result) {
     }
 
     setHtml(prefix + "Rest", html);
+}
+
+// Um bloco de extremos (Máximas ou Mínimas): até 3 ocorrências.
+//   • 1ª ocorrência: ordinal acima (fonte pequena) e temperatura com a MESMA
+//     escala do bloco VENTO (valor grande + unidade menor), seguida da
+//     sensação térmica (ST) e da data/hora.
+//   • Demais: linha compacta (ordinal, temperatura e ST) e data/hora abaixo.
+function renderTempItems(items, variant) {
+    if (!items.length) {
+        return '<div class="temp-empty">sem dados</div>';
+    }
+
+    let html = "";
+
+    items.forEach(function (it, i) {
+        const stText = (it.st == null)
+            ? "ST —"
+            : "ST " + format1(it.st) + " °C";
+        const stCls = (it.st == null) ? " temp-st--none" : "";
+        const when = formatDayShort(it.ts) + " " + timeHm(it.ts);
+        const cat = "temp-item--" + variant;
+
+        if (i === 0) {
+            html +=
+                '<div class="temp-item ' + cat + ' temp-item--top">' +
+                '<div class="temp-top-pos">1ª</div>' +
+                '<div class="temp-line temp-line--top">' +
+                '<span class="temp-v">' + format1(it.value) + "</span>" +
+                '<span class="temp-unit">°C</span>' +
+                "</div>" +
+                '<div class="temp-st temp-st--top' + stCls + '">' +
+                stText + "</div>" +
+                '<div class="temp-when">' + when + "</div>" +
+                "</div>";
+            return;
+        }
+
+        html +=
+            '<div class="temp-item ' + cat + ' temp-item--rest">' +
+            '<div class="temp-line">' +
+            '<span class="temp-pos">' + (i + 1) + "ª</span>" +
+            '<span class="temp-v">' + format1(it.value) + ' °C</span>' +
+            '<span class="temp-st' + stCls + '">' + stText + "</span>" +
+            "</div>" +
+            '<div class="temp-when">' + when + "</div>" +
+            "</div>";
+    });
+
+    return html;
+}
+
+function renderTemperature(extremes) {
+    setHtml("tempMin", renderTempItems(extremes.mins, "min"));
+    setHtml("tempMax", renderTempItems(extremes.maxs, "max"));
 }
 
 function renderRankBlock(title, items, labelFn) {
@@ -628,6 +1039,9 @@ function renderRain(rain, rankings, units, capped) {
 function renderEmpty(message) {
     renderWind("windSpeed", { peaks: [], method: "none" });
     renderWind("windGust", { peaks: [], method: "none" });
+    setText("windNote", "");
+    renderTemperature({ maxs: [], mins: [] });
+    setText("tempNote", "");
     setText("rainTotal", "---");
     setText("rainTotalNote", "");
     setHtml("rainRankings",
@@ -707,11 +1121,17 @@ function reload() {
         const start = spec.start;
         const end = spec.end;
 
+        const tempJobs = [
+            fetchRaw(TEMP_KEY, start, end),
+            fetchRaw(TEMP_FEELS_KEY, start, end)
+        ];
+
         return Promise.all([
             findTopPeaks("wind_speed", start, end, log),
             findTopPeaks("wind_gust", start, end, log),
-            fetchRaw("rain_total", start, end)
-        ]).then(function (res) {
+            fetchRaw("rain_total", start, end),
+            fetchPrevSample("rain_total", start)
+        ].concat(tempJobs)).then(function (res) {
             if (token !== reloadToken) {
                 return;
             }
@@ -719,7 +1139,29 @@ function reload() {
             renderWind("windSpeed", res[0]);
             renderWind("windGust", res[1]);
 
-            const rain = computeRain(res[2].points, start, end);
+            const windLimited = res[0].limited || res[1].limited;
+
+            setText("windNote", windLimited
+                ? "Leitura limitada pelo volume de histórico; a lista " +
+                  "de picos pode estar incompleta."
+                : "");
+
+            // Temperatura (classificação por temperature_out; feels_like_out
+            // entra apenas como "ST" no instante de cada extremo).
+            const tempRaw = res[4];
+            const feelsRaw = res[5];
+
+            renderTemperature(selectTempExtremes(tempRaw.points,
+                feelsRaw.points, TEMP_TOP_N, TEMP_MIN_GAP_MS, start, end));
+
+            setText("tempNote", (tempRaw.capped || feelsRaw.capped)
+                ? "Leitura limitada pelo volume de histórico; os extremos " +
+                  "podem estar incompletos."
+                : "");
+
+            // A amostra anterior ao início evita perder o incremento da
+            // fronteira inicial (marcado como incerto quando não separável).
+            const rain = computeRain(res[2].points, start, end, res[3]);
             const rankings = buildRainRankings(rain.days);
             const units = countCalendarUnits(start, end);
 
@@ -748,13 +1190,18 @@ function reload() {
 //     amostra em que o aumento foi OBSERVADO;
 //   • delta < 0  -> REINICIALIZAÇÃO do contador: não é chuva
 //     (a queda é ignorada) e o dia é marcado como incerto;
-//   • lacuna (intervalo > GAP_TOLERANCE_MS): o incremento NÃO é
-//     redistribuído; ele é contabilizado no instante observado e
-//     os dias envolvidos são marcados como incertos.
+//   • lacuna (intervalo > GAP_TOLERANCE_MS) ou reinício do contador: o
+//     incremento NÃO é redistribuído; ele é contabilizado no instante
+//     observado e TODOS os dias que o intervalo/lacuna atravessa ficam
+//     marcados como incertos;
+//   • fronteira inicial: a 1ª amostra da janela é medida em relação à
+//     amostra imediatamente anterior (prevPoint). Se ela não coincidir com
+//     startTs, esse incremento cruza a fronteira e não é separável -> é
+//     contabilizado, mas os dias tocados ficam incertos (não exato).
 // O total recuperável é preservado; nada é estimado como exato.
 // ============================================================
 
-function computeRain(points, startTs, endTs) {
+function computeRain(points, startTs, endTs, prevPoint) {
     const dayMap = new Map();
     let resetCount = 0;
     let gapCount = 0;
@@ -764,6 +1211,51 @@ function computeRain(points, startTs, endTs) {
             dayMap.set(dayStart, { dayStart: dayStart, mm: 0, uncertain: false });
         }
         return dayMap.get(dayStart);
+    }
+
+    // Marca como incertos TODOS os dias de calendário tocados por
+    // [fromTs, toTs]. O incremento observado no fim de uma lacuna (ou de um
+    // reinício do contador) pode ter ocorrido em qualquer dia do intervalo;
+    // a incerteza é propagada a todos eles. O incremento NÃO é redistribuído.
+    function markRangeUncertain(fromTs, toTs) {
+        let d = startOfSiteDay(fromTs);
+        const last = startOfSiteDay(toTs);
+
+        while (d <= last) {
+            dayEntry(d).uncertain = true;
+            d = addSiteDays(d, 1);
+        }
+    }
+
+    // Fronteira inicial. A leitura crua começa em startTs, mas cada
+    // incremento é medido a partir da amostra anterior; sem tratar isso, o
+    // incremento da 1ª amostra da janela seria perdido (prevPoint é a
+    // amostra imediatamente anterior a startTs).
+    //   • 1ª amostra exatamente em startTs -> fronteira EXATA: a amostra é a
+    //     própria linha de base e o incremento anterior à janela não entra;
+    //   • 1ª amostra DEPOIS de startTs -> o incremento (prevPoint -> 1ª)
+    //     atravessa a fronteira e NÃO é separável. Ele é contabilizado
+    //     (preserva o total recuperável) e os dias tocados ficam INCERTOS;
+    //   • sem prevPoint -> nada existia antes da janela; nada se perde.
+    if (points.length) {
+        const first = points[0];
+
+        if (prevPoint && first.ts > startTs && first.ts < endTs) {
+            const bDelta = first.value - prevPoint.value;
+
+            if (bDelta < 0) {
+                resetCount++;
+                markRangeUncertain(prevPoint.ts, first.ts);
+            } else if (bDelta > 0) {
+                if ((first.ts - prevPoint.ts) > GAP_TOLERANCE_MS) {
+                    gapCount++;
+                }
+                dayEntry(startOfSiteDay(first.ts)).mm += bDelta;
+                markRangeUncertain(prevPoint.ts, first.ts);
+            } else if ((first.ts - prevPoint.ts) > GAP_TOLERANCE_MS) {
+                gapCount++;
+            }
+        }
     }
 
     for (let i = 1; i < points.length; i++) {
@@ -778,12 +1270,11 @@ function computeRain(points, startTs, endTs) {
         const delta = cur.value - prev.value;
 
         if (delta < 0) {
-            // Queda do contador (reinicialização ou ajuste). Não é
-            // chuva: o acumulado anterior é PRESERVADO (nada é
-            // subtraído). O dia é marcado como incerto porque não é
-            // possível distinguir reinicialização de correção.
+            // Queda do contador (reinicialização ou ajuste). Não é chuva:
+            // o acumulado anterior é PRESERVADO (nada é subtraído) e todos
+            // os dias que o contador poderia ter percorrido ficam incertos.
             resetCount++;
-            dayEntry(startOfSiteDay(cur.ts)).uncertain = true;
+            markRangeUncertain(prev.ts, cur.ts);
             continue;
         }
 
@@ -793,13 +1284,7 @@ function computeRain(points, startTs, endTs) {
 
         if ((cur.ts - prev.ts) > GAP_TOLERANCE_MS) {
             gapCount++;
-            dayEntry(startOfSiteDay(cur.ts)).uncertain = true;
-
-            const prevDay = startOfSiteDay(prev.ts);
-
-            if (prevDay !== startOfSiteDay(cur.ts)) {
-                dayEntry(prevDay).uncertain = true;
-            }
+            markRangeUncertain(prev.ts, cur.ts);
         }
 
         dayEntry(startOfSiteDay(cur.ts)).mm += delta;
@@ -838,11 +1323,13 @@ function buildRainRankings(days) {
     }
 
     days.forEach(function (d) {
-        if (d.mm < RAIN_MIN_MM) {
-            return;
-        }
-        add(weekMap, startOfSiteWeek(d.dayStart), d.mm, d.uncertain);
-        add(monthMap, startOfSiteMonth(d.dayStart), d.mm, d.uncertain);
+        // A incerteza propaga MESMO para dias abaixo do limite de exibição:
+        // nenhuma semana/mês potencialmente incerto pode aparecer como exato.
+        // O valor, porém, só é somado quando o dia é exibível.
+        const shown = d.mm >= RAIN_MIN_MM ? d.mm : 0;
+
+        add(weekMap, startOfSiteWeek(d.dayStart), shown, d.uncertain);
+        add(monthMap, startOfSiteMonth(d.dayStart), shown, d.uncertain);
     });
 
     function top(map) {

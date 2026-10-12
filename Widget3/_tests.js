@@ -316,24 +316,629 @@ if (window.__REAL__) {
 }
 
 // ------------------------------------------------------------
+// 7) CORREÇÕES — fronteira inicial e lacunas multidiárias
+// ------------------------------------------------------------
+var DAY = 86400000;
+var bs = S("2026-10-02T03:00:00Z");            // 02/10 00:00 -03
+var be = bs + DAY;
+
+// (a) 1ª amostra DEPOIS do início -> incremento da fronteira recuperado,
+//     porém incerto (não é separável entre dentro/fora da janela).
+var rBd = computeRain(pts([
+    [bs + 30000, 100.4],
+    [bs + 90000, 100.6]
+]), bs, be, { ts: bs - 30000, value: 100.0 });
+check("fronteira: total inclui incremento inicial", rBd.total, 0.6);
+checkTrue("fronteira: dia incerto", rBd.days[0].uncertain);
+
+// (b) Sem a amostra anterior, o incremento da fronteira não é recuperável.
+var rBd0 = computeRain(pts([
+    [bs + 30000, 100.4],
+    [bs + 90000, 100.6]
+]), bs, be);
+check("fronteira: sem amostra anterior -> total", rBd0.total, 0.2);
+
+// (c) 1ª amostra EXATAMENTE em startTs -> fronteira exata; o incremento
+//     anterior à janela NÃO entra e nada fica incerto.
+var rBdEx = computeRain(pts([
+    [bs, 100.4],
+    [bs + M, 100.6]
+]), bs, be, { ts: bs - M, value: 100.0 });
+check("fronteira exata: total (exclui pre-janela)", rBdEx.total, 0.2);
+checkTrue("fronteira exata: dia exato", !rBdEx.days[0].uncertain);
+
+// (d) Janela terminando exatamente num timestamp de amostra (fim exclusivo).
+var rEndEx = computeRain(pts([
+    [bs + M, 5.0],
+    [bs + 2 * M, 5.3],
+    [bs + DAY, 6.0]                            // == endTs -> excluído
+]), bs, be, { ts: bs - M, value: 5.0 });
+check("fim exclusivo: total", rEndEx.total, 0.3);
+checkTrue("fim exclusivo: sem incerteza de fronteira (delta 0)",
+    !rEndEx.days[0].uncertain);
+
+// (e) Lacuna atravessando >= 3 dias: TODOS os dias tocados incertos.
+var gs = S("2026-10-10T03:00:00Z");
+var rGap3 = computeRain(pts([
+    [gs, 10.0],
+    [gs + 3 * DAY + M, 20.0]
+]), gs, gs + 5 * DAY);
+check("lacuna 3 dias: total", rGap3.total, 10);
+check("lacuna 3 dias: nº dias", rGap3.days.length, 4);
+checkTrue("lacuna 3 dias: todos incertos",
+    rGap3.days.every(function (d) { return d.uncertain; }));
+
+// (f) Reset do contador seguido de recuperação.
+var rs = S("2026-10-12T03:00:00Z");
+var rRec = computeRain(pts([
+    [rs, 5.0],
+    [rs + M, 5.2],                             // +0,2
+    [rs + 2 * M, 0.0],                         // reset (queda)
+    [rs + 3 * M, 0.3],                         // retoma +0,3
+    [rs + 4 * M, 0.5]                          // +0,2
+]), rs, rs + DAY);
+check("reset+recuperação: total", rRec.total, 0.7);
+check("reset+recuperação: resetCount", rRec.resetCount, 1);
+checkTrue("reset+recuperação: dia incerto", rRec.days[0].uncertain);
+
+// ------------------------------------------------------------
+// 7b) CONSISTÊNCIA total x dias x semanas x meses
+// ------------------------------------------------------------
+var c0 = S("2026-09-25T03:00:00Z");            // 25/09 00:00
+var cons = computeRain(pts([
+    [c0, 0],
+    [c0 + 2 * DAY, 4.5],
+    [c0 + 6 * DAY, 9.0],
+    [c0 + 10 * DAY, 13.0]
+]), c0, c0 + 12 * DAY);
+check("consistência: total", cons.total, 13);
+var sumDays = cons.days.reduce(function (a, d) { return a + d.mm; }, 0);
+check("consistência: total == soma dias", Math.round(sumDays * 100) / 100, 13);
+var rkCons = buildRainRankings(cons.days);
+var sumWk = rkCons.weeks.reduce(function (a, w) { return a + w.mm; }, 0);
+var sumMo = rkCons.months.reduce(function (a, m) { return a + m.mm; }, 0);
+check("consistência: soma semanas == total", Math.round(sumWk * 100) / 100, 13);
+check("consistência: soma meses == total", Math.round(sumMo * 100) / 100, 13);
+
+// A incerteza de um dia sem chuva (0 mm, mas atingido por lacuna) deve
+// propagar para a semana/mês (nenhum acumulado incerto aparece exato).
+var rkUnc = buildRainRankings([
+    { dayStart: S("2026-10-04T03:00:00Z"), mm: 5.0, uncertain: false },
+    { dayStart: S("2026-10-06T03:00:00Z"), mm: 0, uncertain: true }
+]);
+checkTrue("ranking: incerteza de dia 0 mm propaga à semana", rkUnc.weeks[0].uncertain);
+checkTrue("ranking: incerteza de dia 0 mm propaga ao mês", rkUnc.months[0].uncertain);
+
+// ------------------------------------------------------------
+// 8) CANDIDATOS A PICO — distribuição e separação
+// ------------------------------------------------------------
+var t0p = S("2026-01-01T00:00:00Z");
+
+// Muitos picos fortes no MESMO episódio (< 24 h) -> só 1 candidato.
+var conc = selectSpreadCandidates(pts([
+    [t0p, 100], [t0p + H, 98], [t0p + 2 * H, 96], [t0p + 23 * H, 95]
+]), PEAK_MIN_GAP_MS, COARSE_TOP_K);
+check("candidatos: episódio único -> 1", conc.length, 1);
+check("candidatos: episódio único valor", conc[0].value, 100);
+
+// Picos distribuídos em > 1 ano -> candidatos espalhados e >= 24 h.
+var spreadB = selectSpreadCandidates(pts([
+    [t0p, 100],
+    [t0p + 2 * H, 99],                         // mesmo episódio
+    [t0p + 5 * DAY, 80],
+    [t0p + 200 * DAY, 90],
+    [t0p + 370 * DAY, 70]
+]), PEAK_MIN_GAP_MS, COARSE_TOP_K);
+check("candidatos >1 ano: quantidade", spreadB.length, 4);
+checkTrue("candidatos >1 ano: separados >= 24h",
+    pairwiseGapOk(spreadB, PEAK_MIN_GAP_MS));
+checkTrue("candidatos >1 ano: cobrem a janela (> 1 ano)",
+    spreadB[spreadB.length - 1].ts - spreadB[0].ts > 365 * DAY);
+
+// Três picos efetivamente separados por >= 24 h -> 3 escolhidos.
+var threeP = selectPeaks(pts([
+    [t0p, 50], [t0p + 24 * H, 45], [t0p + 48 * H, 40]
+]), PEAK_MIN_GAP_MS, 3);
+check("3 picos >=24h: quantidade", threeP.length, 3);
+checkTrue("3 picos >=24h: separação",
+    Math.abs(threeP[0].ts - threeP[1].ts) >= PEAK_MIN_GAP_MS &&
+    Math.abs(threeP[1].ts - threeP[2].ts) >= PEAK_MIN_GAP_MS);
+
+// Helper: todos os pares de uma lista separados por >= gap.
+function pairwiseGapOk(list, gap) {
+    for (var i = 0; i < list.length; i++) {
+        for (var j = i + 1; j < list.length; j++) {
+            if (Math.abs(list[i].ts - list[j].ts) < gap) { return false; }
+        }
+    }
+    return true;
+}
+
+// ------------------------------------------------------------
+// 9) PLANEJAMENTO DA AGREGAÇÃO (limites reais da API do ThingsBoard)
+// ------------------------------------------------------------
+var YEAR = 365 * DAY;
+check("agg: intervalo para 1 ano = 1 h", chooseAggInterval(YEAR), COARSE_INTERVAL_MS);
+var iv5 = chooseAggInterval(5 * YEAR);
+checkTrue("agg: intervalo cresce p/ 5 anos", iv5 > COARSE_INTERVAL_MS);
+
+var plan1 = planAggWindows(t0p, t0p + YEAR, COARSE_INTERVAL_MS, 500, 20);
+checkTrue("plan 1a: cobre a janela",
+    plan1.windows[0].start === t0p &&
+    plan1.windows[plan1.windows.length - 1].end === t0p + YEAR);
+checkTrue("plan 1a: contíguo", plan1.windows.every(function (w, i, a) {
+    return i === 0 || a[i - 1].end === w.start;
+}));
+checkTrue("plan 1a: <= 500 intervalos por consulta",
+    plan1.windows.every(function (w) {
+        return (w.end - w.start) / COARSE_INTERVAL_MS <= 500;
+    }));
+checkTrue("plan 1a: não truncado", !plan1.capped);
+
+var plan5 = planAggWindows(t0p, t0p + 5 * YEAR, iv5, 500, 20);
+checkTrue("plan 5a: <= 500 intervalos por consulta",
+    plan5.windows.every(function (w) { return (w.end - w.start) / iv5 <= 500; }));
+checkTrue("plan 5a: não truncado", !plan5.capped);
+
+var planCap = planAggWindows(t0p, t0p + YEAR, COARSE_INTERVAL_MS, 500, 2);
+checkTrue("plan: capped ao atingir o teto de consultas", planCap.capped);
+
+// ------------------------------------------------------------
+// 11) EXTREMOS DE TEMPERATURA (classificação por temperature_out,
+//     ST complementar e separação de 24 h)
+// ------------------------------------------------------------
+var tt0 = S("2026-10-08T03:00:00Z");           // 08/10 00:00 -03
+var G24 = 24 * H;                              // janela mínima entre extremos
+
+// (a) Ordenação SOMENTE pelas temperaturas externas. A sensação térmica é
+// "invertida" (100 - temp): se a classificação usasse feels_like, a ordem
+// mudaria — logo prova que ela é complementar.
+var tTemp = pts([
+    [tt0, 10.0],
+    [tt0 + DAY, 25.0],
+    [tt0 + 2 * DAY, 5.0],
+    [tt0 + 3 * DAY, 30.0],
+    [tt0 + 4 * DAY, -2.0],
+    [tt0 + 5 * DAY, 18.0]
+]);
+var tFeels = pts([
+    [tt0, 90.0], [tt0 + DAY, 75.0], [tt0 + 2 * DAY, 95.0],
+    [tt0 + 3 * DAY, 70.0], [tt0 + 4 * DAY, 102.0], [tt0 + 5 * DAY, 82.0]
+]);
+var tExt = selectTempExtremes(tTemp, tFeels, 3, G24, null, null);
+check("temp: ocorrências", tExt.count, 6);
+check("temp máx qtd", tExt.maxs.length, 3);
+check("temp máx 1º (só temperature_out)", tExt.maxs[0].value, 30);
+check("temp máx 2º", tExt.maxs[1].value, 25);
+check("temp máx 3º", tExt.maxs[2].value, 18);
+check("temp mín 1º", tExt.mins[0].value, -2);
+check("temp mín 2º", tExt.mins[1].value, 5);
+check("temp mín 3º", tExt.mins[2].value, 10);
+check("ST do máx 1º (mesmo instante)", tExt.maxs[0].st, 70);
+check("ST da mín 1º (mesmo instante)", tExt.mins[0].st, 102);
+
+// (b) Separação temporal mínima (24 h) nas máximas E nas mínimas.
+check("temp <24h: 1 máx",
+    selectTempExtremes(pts([[tt0, 30.0], [tt0 + 23 * H, 29.0]]), [], 3, G24).maxs.length, 1);
+check("temp =24h: 2 máx",
+    selectTempExtremes(pts([[tt0, 30.0], [tt0 + 24 * H, 29.0]]), [], 3, G24).maxs.length, 2);
+check("temp >24h: 2 máx",
+    selectTempExtremes(pts([[tt0, 30.0], [tt0 + 25 * H, 29.0]]), [], 3, G24).maxs.length, 2);
+check("temp <24h: 1 mín",
+    selectTempExtremes(pts([[tt0, 1.0], [tt0 + 23 * H, 2.0]]), [], 3, G24).mins.length, 1);
+check("temp =24h: 2 mín",
+    selectTempExtremes(pts([[tt0, 1.0], [tt0 + 24 * H, 2.0]]), [], 3, G24).mins.length, 2);
+
+// (c) Patamares consecutivos (mesmo valor) = uma ocorrência.
+var tRep = selectTempExtremes(pts([
+    [tt0, 20.0], [tt0 + M, 20.0], [tt0 + 2 * M, 20.0],
+    [tt0 + DAY, 21.0], [tt0 + DAY + M, 21.0],
+    [tt0 + 2 * DAY, 19.0]
+]), [], 3, G24);
+check("temp patamar: ocorrências", tRep.count, 3);
+check("temp patamar: máx 1º", tRep.maxs[0].value, 21);
+check("temp patamar: máx 1º ts (1ª do patamar)", tRep.maxs[0].ts, tt0 + DAY);
+check("temp patamar: máx 2º", tRep.maxs[1].value, 20);
+check("temp patamar: máx 3º", tRep.maxs[2].value, 19);
+check("temp patamar: mín 1º", tRep.mins[0].value, 19);
+
+// (d) Mesmo valor em dias diferentes (>= 24 h) ocupa posições distintas e,
+// no empate, vem primeiro a ocorrência mais antiga.
+var tTie = selectTempExtremes(pts([
+    [tt0, 25.0], [tt0 + M, 25.0],
+    [tt0 + DAY, 25.0], [tt0 + DAY + M, 25.0],
+    [tt0 + 2 * DAY, 25.0], [tt0 + 2 * DAY + M, 25.0]
+]), [], 3, G24);
+check("temp empate dias: 3 posições", tTie.maxs.length, 3);
+checkTrue("temp empate dias: mais antigo primeiro",
+    tTie.maxs[0].ts === tt0 && tTie.maxs[1].ts === tt0 + DAY &&
+    tTie.maxs[2].ts === tt0 + 2 * DAY);
+check("temp empate dias: mín também 3", tTie.mins.length, 3);
+check("temp empate <24h: cai para 1",
+    selectTempExtremes(pts([[tt0, 25.0], [tt0 + 10 * H, 25.0]]), [], 3, G24).maxs.length, 1);
+
+// (e) Menos de três ocorrências -> menos resultados (sem preencher posições).
+var tFew = selectTempExtremes(pts([[tt0, 1.0], [tt0 + DAY, 2.0]]), [], 3, G24);
+check("temp poucas: máx qtd", tFew.maxs.length, 2);
+check("temp poucas: mín qtd", tFew.mins.length, 2);
+check("temp poucas: mín 1º", tFew.mins[0].value, 1);
+
+// (f) Período sem dados.
+var tNone = selectTempExtremes([], [], 3, G24);
+check("temp sem dados: máx qtd", tNone.maxs.length, 0);
+check("temp sem dados: ocorrências", tNone.count, 0);
+
+// (g) Associação da sensação térmica: exata, dentro e fora da tolerância.
+var stTemp = pts([[tt0, 20.0], [tt0 + DAY, 22.0], [tt0 + 2 * DAY, 24.0]]);
+var stFeels = pts([
+    [tt0, 19.5],                          // exato
+    [tt0 + DAY + 2 * M, 21.0],            // +2 min -> dentro (tolerância 3 min)
+    [tt0 + 2 * DAY + 10 * M, 5.0]         // +10 min -> fora -> "ST —"
+]);
+var tSt = selectTempExtremes(stTemp, stFeels, 3, G24);
+check("ST exato", tSt.maxs[2].st, 19.5);
+check("ST dentro da tolerância (2 min)", tSt.maxs[1].st, 21.0);
+checkTrue("ST fora da tolerância -> null", tSt.maxs[0].st === null);
+
+// (h) Limites [início inclusivo, fim exclusivo).
+var tWin = selectTempExtremes(pts([
+    [tt0 - M, 99.0],                // antes do início -> excluído
+    [tt0, 20.0],
+    [tt0 + DAY, 8.0],
+    [tt0 + 2 * DAY, 77.0]           // == endTs -> excluído
+]), [], 3, G24, tt0, tt0 + 2 * DAY);
+check("temp janela: ocorrências", tWin.count, 2);
+check("temp janela: máx", tWin.maxs[0].value, 20);
+check("temp janela: mín", tWin.mins[0].value, 8);
+
+// (i) Mudança de dia/mês/ano (fuso do Sítio, UTC-3).
+var tYear = selectTempExtremes(pts([
+    [S("2025-12-31T03:00:00Z"), 10.0],  // 31/12/2025 00:00 -03
+    [S("2026-01-01T03:00:00Z"), 20.0],  // 01/01/2026 00:00 -03
+    [S("2026-01-02T03:00:00Z"), 15.0]
+]), [], 3, G24);
+check("temp ano: máx", tYear.maxs[0].value, 20);
+check("temp ano: data/hora do máx",
+    formatDayShort(tYear.maxs[0].ts) + " " + timeHm(tYear.maxs[0].ts),
+    "01/01 00:00");
+check("temp ano: data do 1º (mín)", formatDayShort(tYear.mins[0].ts), "31/12");
+
+// (j) Formatação de valores.
+check("formato: 1 casa", format1(30), "30.0");
+check("formato: negativo", format1(-2), "-2.0");
+
+// (k) Render: classes de cor/categoria, ST, destaque do 1º e data/hora.
+var rMax = renderTempItems(tExt.maxs, "max");
+checkTrue("render: categoria máximas", rMax.indexOf("temp-item--max") >= 0);
+checkTrue("render: 1º em destaque", rMax.indexOf("temp-item--top") >= 0);
+checkTrue("render: demais menores", rMax.indexOf("temp-item--rest") >= 0);
+checkTrue("render: unidade °C", rMax.indexOf("°C") >= 0);
+checkTrue("render: ordinal 1ª acima", rMax.indexOf("temp-top-pos") >= 0 &&
+    rMax.indexOf("1ª") >= 0);
+checkTrue("render: unidade separada no 1º",
+    rMax.indexOf("temp-line--top") >= 0 && rMax.indexOf("temp-unit") >= 0);
+checkTrue("render: ST junto à temperatura", rMax.indexOf("ST ") >= 0);
+check("render: 3 itens", (rMax.match(/class="temp-item /g) || []).length, 3);
+
+var rMin = renderTempItems([{ ts: tt0, value: 5.0, st: null }], "min");
+checkTrue("render: categoria mínimas", rMin.indexOf("temp-item--min") >= 0);
+checkTrue("render: ST ausente -> —", rMin.indexOf("ST —") >= 0);
+checkTrue("render: data presente", rMin.indexOf(formatDayShort(tt0)) >= 0);
+checkTrue("render vazio: 'sem dados'",
+    renderTempItems([], "max").indexOf("sem dados") >= 0);
+
+// ------------------------------------------------------------
 // Resultado
 // ------------------------------------------------------------
-document.getElementById("out").textContent =
-    "PASS " + passedCount + " / FAIL " + failedCount +
-    (window.__errors.length ? " / ERR " + window.__errors.length : "") + "\n" +
-    results.filter(function (r) { return !r.ok; })
-        .map(function (r) { return "FAIL " + r.name + " got=" + r.got + " want=" + r.want; })
-        .join("\n") +
-    (window.__errors.length ? "\nJS ERRORS: " + window.__errors.join("; ") : "");
+function reportResults() {
+    document.getElementById("out").textContent =
+        "PASS " + passedCount + " / FAIL " + failedCount +
+        (window.__errors.length ? " / ERR " + window.__errors.length : "") + "\n" +
+        results.filter(function (r) { return !r.ok; })
+            .map(function (r) { return "FAIL " + r.name + " got=" + r.got + " want=" + r.want; })
+            .join("\n") +
+        (window.__errors.length ? "\nJS ERRORS: " + window.__errors.join("; ") : "");
 
-try {
-    navigator.sendBeacon("/__result", JSON.stringify({
-        passed: passedCount,
-        failed: failedCount,
-        errors: window.__errors,
-        real: !!window.__REAL__,
-        results: results
-    }));
-} catch (e) { /* ignora */ }
+    try {
+        navigator.sendBeacon("/__result", JSON.stringify({
+            passed: passedCount,
+            failed: failedCount,
+            errors: window.__errors,
+            real: !!window.__REAL__,
+            results: results
+        }));
+    } catch (e) { /* ignora */ }
+}
+
+// ------------------------------------------------------------
+// 10) INTEGRAÇÃO DA AGREGAÇÃO (servidor simulado — assíncrono)
+// ------------------------------------------------------------
+// Stub que imita a API do ThingsBoard: rejeita consultas agregadas com
+// mais de `maxIntervals` intervalos, honra `limit`/`orderBy` e, quando
+// `rawFn` é dado, serve a leitura crua (refino) amostra a amostra.
+function installTelemetryStub(buckets, opts) {
+    opts = opts || {};
+    var calls = [];
+    var original = ctx.http.get;
+
+    ctx.http.get = function (url) {
+        var key = decodeURIComponent((/keys=([^&]+)/.exec(url) || [])[1] || "");
+        var start = Number((/startTs=(-?\d+)/.exec(url) || [])[1]);
+        var end = Number((/endTs=(-?\d+)/.exec(url) || [])[1]);
+        var rawInterval = (/interval=(\d+)/.exec(url) || [])[1];
+        var interval = rawInterval ? Number(rawInterval) : 0;
+        var limit = Number(((/limit=(\d+)/.exec(url) || [])[1]) || 100);
+        var asc = /orderBy=ASC/.test(url);
+
+        calls.push({ start: start, end: end, interval: interval });
+
+        return {
+            subscribe: function (ok, err) {
+                if (interval > 0) {
+                    var intervals = Math.ceil((end - start) / interval);
+
+                    if (opts.maxIntervals && intervals > opts.maxIntervals) {
+                        if (err) { err(new Error("Number of intervals is to high - " + intervals)); }
+                        return { unsubscribe: function () {} };
+                    }
+
+                    var sel = buckets.filter(function (b) {
+                        return b.ts >= start && b.ts <= end;
+                    });
+                    sel.sort(function (a, b) { return asc ? a.ts - b.ts : b.ts - a.ts; });
+                    sel = sel.slice(0, limit);
+
+                    var resp = {};
+                    resp[key] = sel.map(function (b) {
+                        return { ts: b.ts, value: String(b.value) };
+                    });
+                    ok(resp);
+                    return { unsubscribe: function () {} };
+                }
+
+                var out = [];
+                var stepMs = 60000;
+
+                if (opts.rawFn) {
+                    if (asc) {
+                        for (var t = start; t <= end && out.length < limit; t += stepMs) {
+                            var v = opts.rawFn(key, t);
+                            if (v != null) { out.push({ ts: t, value: String(v) }); }
+                        }
+                    } else {
+                        for (var t2 = end; t2 >= start && out.length < limit; t2 -= stepMs) {
+                            var v2 = opts.rawFn(key, t2);
+                            if (v2 != null) { out.push({ ts: t2, value: String(v2) }); }
+                        }
+                    }
+                }
+
+                var rawResp = {};
+                rawResp[key] = out;
+                ok(rawResp);
+                return { unsubscribe: function () {} };
+            }
+        };
+    };
+
+    return {
+        calls: calls,
+        restore: function () { ctx.http.get = original; }
+    };
+}
+
+// Fixture: 400 dias de buckets horários com 3 episódios separados e um
+// episódio concentrado (vários picos fortes em < 24 h).
+function buildAggFixture() {
+    var aggStart = S("2024-01-01T00:00:00Z");
+    var hours = 400 * 24;
+
+    function bucketVal(ts) {
+        var h = Math.round((ts - aggStart) / H);
+        var v = 5 + 3 * Math.sin(h / 24);
+
+        if (h === 24 * 10) { v = 90; }
+        if (h === 24 * 100) { v = 70; }        // episódio concentrado
+        if (h === 24 * 100 + 1) { v = 72; }
+        if (h === 24 * 100 + 2) { v = 71; }
+        if (h === 24 * 200) { v = 85; }
+        if (h === 24 * 380) { v = 80; }
+        return v;
+    }
+
+    function rawVal(key, ts) {
+        var h = Math.floor((ts - aggStart) / H);
+        var mid = aggStart + h * H + 30 * 60000;
+
+        if (Math.abs(ts - mid) < 30000) { return bucketVal(aggStart + h * H); }
+        return 5 + 3 * Math.sin(h / 24) * 0.9;
+    }
+
+    var buckets = [];
+    for (var i = 0; i < hours; i++) {
+        buckets.push({ ts: aggStart + i * H, value: bucketVal(aggStart + i * H) });
+    }
+
+    return {
+        start: aggStart,
+        end: aggStart + hours * H,
+        hours: hours,
+        buckets: buckets,
+        rawVal: rawVal
+    };
+}
+
+function runAsyncTests() {
+    var fx = buildAggFixture();
+
+    // (1) fetchAggWindow: cobertura completa, sem truncar em 5000 e
+    //     respeitando o limite real de intervalos por consulta.
+    function testCoverage() {
+        var stub = installTelemetryStub(fx.buckets, { maxIntervals: 700 });
+
+        return fetchAggWindow("wind_speed", fx.start, fx.end, COARSE_INTERVAL_MS,
+            "MAX", AGG_MAX_REQUESTS).then(function (r) {
+            check("pagin/agg: capped=false", r.capped, false);
+            check("pagin/agg: cobertura completa", r.buckets.length, fx.buckets.length);
+            check("pagin/agg: 1º bucket", r.buckets[0].ts, fx.start);
+            check("pagin/agg: último bucket", r.buckets[r.buckets.length - 1].ts,
+                fx.start + (fx.hours - 1) * H);
+            checkTrue("pagin/agg: nenhuma consulta > 700 intervalos",
+                stub.calls.every(function (c) {
+                    return c.interval > 0 &&
+                        Math.ceil((c.end - c.start) / c.interval) <= 700;
+                }));
+
+            var cand = selectSpreadCandidates(r.buckets, PEAK_MIN_GAP_MS, COARSE_TOP_K);
+            var tsList = cand.map(function (c) { return c.ts; });
+
+            checkTrue("pagin/agg: candidatos separados >= 24h",
+                pairwiseGapOk(cand, PEAK_MIN_GAP_MS));
+            check("pagin/agg: 1º candidato", cand[0].value, 90);
+            checkTrue("pagin/agg: candidatos cobrem a janela (> 300 dias)",
+                (Math.max.apply(null, tsList) - Math.min.apply(null, tsList)) > 300 * DAY);
+            check("pagin/agg: episódio concentrado -> 1 candidato",
+                cand.filter(function (c) {
+                    return Math.abs(c.ts - (fx.start + 24 * 100 * H)) < 24 * H;
+                }).length, 1);
+        }).then(function () { stub.restore(); });
+    }
+
+    // (2) findTopPeaks: caminho agregado, 3 picos >= 24 h e limited=false.
+    function testFindTopPeaks() {
+        var stub = installTelemetryStub(fx.buckets,
+            { maxIntervals: 700, rawFn: fx.rawVal });
+
+        return findTopPeaks("wind_speed", fx.start, fx.end, function () {})
+            .then(function (res) {
+                check("findTopPeaks: método", res.method, "aggregated");
+                check("findTopPeaks: limited", res.limited, false);
+                check("findTopPeaks: qtd", res.peaks.length, 3);
+                check("findTopPeaks: 1º", Math.round(res.peaks[0].value * 100) / 100, 90);
+                check("findTopPeaks: 2º", Math.round(res.peaks[1].value * 100) / 100, 85);
+                check("findTopPeaks: 3º", Math.round(res.peaks[2].value * 100) / 100, 80);
+                checkTrue("findTopPeaks: >= 24h entre picos",
+                    pairwiseGapOk(res.peaks, PEAK_MIN_GAP_MS));
+            }).then(function () { stub.restore(); });
+    }
+
+    // (3) Teto de sub-consultas atingido -> resposta parcial sinalizada.
+    function testCap() {
+        var stub = installTelemetryStub(fx.buckets, { maxIntervals: 700 });
+
+        return fetchAggWindow("wind_speed", fx.start, fx.end, COARSE_INTERVAL_MS,
+            "MAX", 3).then(function (r) {
+            check("pagin/agg: teto -> capped", r.capped, true);
+            checkTrue("pagin/agg: parcial < total", r.buckets.length < fx.buckets.length);
+        }).then(function () { stub.restore(); });
+    }
+
+    // (4) API rejeita por limite de intervalos -> não falha; sinaliza capped.
+    function testApiReject() {
+        var stub = installTelemetryStub(fx.buckets, { maxIntervals: 50 });
+
+        return fetchAggWindow("wind_speed", fx.start, fx.end, COARSE_INTERVAL_MS,
+            "MAX", AGG_MAX_REQUESTS).then(function (r) {
+            check("pagin/agg: rejeição da API -> capped", r.capped, true);
+            check("pagin/agg: rejeição -> sem buckets", r.buckets.length, 0);
+        }).then(function () { stub.restore(); });
+    }
+
+    // (5) Temperatura: histórico longo com paginação da leitura crua.
+    function testTempPagination() {
+        var tStart = S("2024-01-01T00:00:00Z");
+        var tEnd = tStart + 4500 * 60000;
+
+        function tempVal(key, ts) {
+            var i = Math.round((ts - tStart) / 60000);
+            return 10 + (i % 100) / 10 + (i === 1000 ? 20 : 0);
+        }
+
+        var stub = installTelemetryStub([], { rawFn: tempVal });
+
+        return fetchRaw("temperature_out", tStart, tEnd).then(function (r) {
+            checkTrue("temp paginação: >= 2 consultas", stub.calls.length >= 2);
+            checkTrue("temp paginação: > 4000 amostras (paginou)",
+                r.points.length > 4000);
+            check("temp paginação: capped", r.capped, false);
+
+            var ex = selectTempExtremes(r.points, [], 3, 24 * H, tStart, tEnd);
+            check("temp paginação: máx", ex.maxs[0].value, 30);
+            check("temp paginação: mín", ex.mins[0].value, 10);
+            checkTrue("temp paginação: ocorrências > 1000", ex.count > 1000);
+        }).then(function () {
+            stub.restore();
+
+            var stubCap = installTelemetryStub([], { rawFn: tempVal });
+
+            return fetchRaw("temperature_out", tStart, tEnd, 1).then(function (r2) {
+                check("temp paginação: capped com 1 página", r2.capped, true);
+                check("temp paginação: 1 página = 4000", r2.points.length, 4000);
+            }).then(function () { stubCap.restore(); });
+        });
+    }
+
+    // (6) Cores/estrutura da seção TEMPERATURA (CSS) e ordem das colunas (HTML).
+    function testTempCss() {
+        var css = "";
+
+        return fetch("style.css").then(function (r) { return r.text(); })
+            .then(function (text) {
+                css = text;
+                return fetch("index.html");
+            })
+            .then(function (r) { return r.text(); })
+            .then(function (html) {
+                checkTrue("css: 2 colunas + divisor vertical",
+                    css.indexOf(".temp-grid") >= 0 &&
+                    css.indexOf("grid-template-columns: 1fr 1fr") >= 0 &&
+                    css.indexOf(".temp-block + .temp-block") >= 0);
+                checkTrue("css: máximas em vermelho-alaranjado",
+                    css.indexOf(".temp-cat--max") >= 0 &&
+                    css.indexOf("#ff6b52") >= 0);
+                checkTrue("css: mínimas em azul-claro",
+                    css.indexOf(".temp-cat--min") >= 0 &&
+                    css.indexOf("#5cc8ff") >= 0);
+                checkTrue("css: ST secundária (mesma família)",
+                    css.indexOf(".temp-item--max .temp-st") >= 0 &&
+                    css.indexOf(".temp-item--min .temp-st") >= 0);
+                checkTrue("css: data/hora cinza-claro",
+                    css.indexOf(".temp-when") >= 0 &&
+                    css.indexOf("#c2c7cd") >= 0);
+                checkTrue("css: 1º na escala grande (40px) e demais menores",
+                    /\.temp-item--top \.temp-v \{[^}]*font-size:\s*40px/.test(css) &&
+                    /\.temp-item--rest \.temp-v \{[^}]*font-size:\s*15px/.test(css));
+                checkTrue("css: ordinal acima e unidade separada",
+                    css.indexOf(".temp-top-pos") >= 0 &&
+                    css.indexOf(".temp-unit") >= 0 &&
+                    css.indexOf(".temp-line--top") >= 0);
+                checkTrue("html: Máximas à esquerda de Mínimas",
+                    html.indexOf("temp-block--max") >= 0 &&
+                    html.indexOf("temp-block--max") < html.indexOf("temp-block--min"));
+            });
+    }
+
+    return testCoverage()
+        .then(testFindTopPeaks)
+        .then(testCap)
+        .then(testApiReject)
+        .then(testTempPagination)
+        .then(testTempCss);
+}
+
+var __reported = false;
+
+function finish() {
+    if (!__reported) {
+        __reported = true;
+        reportResults();
+    }
+}
+
+runAsyncTests().then(finish).catch(function (e) {
+    window.__errors = window.__errors || [];
+    window.__errors.push("async: " + (e && e.message ? e.message : e));
+    finish();
+});
 
 

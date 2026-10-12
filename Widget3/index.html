@@ -17,6 +17,24 @@
         </select>
     </div>
 
+    <section class="section temperatura">
+        <div class="section-title">TEMPERATURA</div>
+
+        <div class="temp-grid">
+            <div class="temp-block temp-block--max">
+                <div class="temp-cat temp-cat--max">Máximas</div>
+                <div id="tempMax" class="temp-items"></div>
+            </div>
+
+            <div class="temp-block temp-block--min">
+                <div class="temp-cat temp-cat--min">Mínimas</div>
+                <div id="tempMin" class="temp-items"></div>
+            </div>
+        </div>
+
+        <div id="tempNote" class="mini-note"></div>
+    </section>
+
     <section class="section vento">
         <div class="section-title">VENTO</div>
 
@@ -76,6 +94,13 @@
             <button id="helpClose" class="help-close" title="Fechar">×</button>
             <div class="help-title">MÁXIMOS E TOTAIS</div>
             <div class="help-list">
+                <div class="help-text">
+                    <strong>Temperatura:</strong> as três maiores e as três menores
+                    temperaturas externas do período, com separação mínima de 24
+                    horas entre as ocorrências. A sensação térmica (ST) é a do mesmo
+                    instante de cada extremo. Amostras consecutivas com o mesmo valor
+                    (0,1 °C) contam como uma única ocorrência.
+                </div>
                 <div class="help-text">
                     <strong>Vento e rajadas:</strong> até três picos distintos, com
                     separação mínima de 24 horas entre os horários escolhidos. Um

@@ -205,6 +205,117 @@
 
 .mini-note:empty { display: none; }
 
+/* ---------------- TEMPERATURA (mínimas | máximas) ---------------- */
+
+.temperatura {
+    padding-bottom: 12px;
+    border-bottom: 1px solid #555960;
+    margin-bottom: 6px;
+}
+
+.temp-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    box-sizing: border-box;
+}
+
+.temp-block {
+    min-width: 0;
+    text-align: center;
+    box-sizing: border-box;
+    padding: 0 10px;
+}
+
+.temp-block + .temp-block { border-left: 1px solid #555960; }
+
+/* Títulos das categorias mantêm a fonte do MoniTemp (section-title),
+   apenas menores e com a cor da categoria. */
+.temp-cat {
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    margin-bottom: 4px;
+}
+
+.temp-cat--max { color: #ff6b52; }   /* máximas: vermelho-alaranjado */
+.temp-cat--min { color: #5cc8ff; }   /* mínimas: azul-claro */
+
+.temp-items { display: flex; flex-direction: column; }
+
+.temp-item { margin-bottom: 3px; }
+.temp-item--top { margin-bottom: 5px; }
+
+.temp-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    column-gap: 6px;
+    flex-wrap: wrap;
+}
+
+.temp-pos { color: #969ba3; font-size: 11px; line-height: 14px; }
+
+.temp-v {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Sensação térmica: mesma família da categoria, com destaque secundário. */
+.temp-st {
+    font-size: 11px;
+    line-height: 14px;
+    white-space: nowrap;
+    opacity: 0.9;
+}
+
+.temp-item--max .temp-v, .temp-item--max .temp-unit { color: #ff6b52; }
+.temp-item--max .temp-st { color: #ff9a86; }
+.temp-item--max .temp-st--top { color: #ff6b52; }
+.temp-item--min .temp-v, .temp-item--min .temp-unit { color: #5cc8ff; }
+.temp-item--min .temp-st { color: #8fd8ff; }
+.temp-item--min .temp-st--top { color: #5cc8ff; }
+.temp-st--none { opacity: 0.6; }
+
+/* 1º extremo em destaque, na MESMA escala do bloco VENTO (.peak-value),
+   com o ordinal acima em fonte pequena; os demais em fonte menor. */
+.temp-top-pos {
+    color: #b8bdc4;
+    font-size: 11px;
+    line-height: 14px;
+    margin-bottom: 1px;
+}
+
+.temp-line--top { column-gap: 4px; }
+
+.temp-item--top .temp-v {
+    font-size: 40px;
+    line-height: 44px;
+    font-weight: 500;
+}
+
+.temp-unit { font-size: 14px; line-height: 18px; font-weight: 400; }
+
+.temp-item--top .temp-st {
+    font-size: 14px;
+    line-height: 18px;
+    font-weight: 600;
+    margin-top: 1px;
+    opacity: 1;
+}
+
+.temp-item--rest .temp-v { font-size: 15px; line-height: 17px; }
+
+.temp-when {
+    color: #c2c7cd;
+    font-size: 11px;
+    line-height: 14px;
+    margin-top: 1px;
+}
+
+.temp-empty { color: #969ba3; font-size: 12px; padding: 2px 0; }
+
 /* ---------------- Rodapé / ajuda ---------------- */
 
 .last-update-row {
@@ -254,6 +365,11 @@
     z-index: 5;
 }
 
+/* O atributo `hidden` precisa vencer o `display: flex` acima; sem esta
+   regra o UA ([hidden] -> display:none) é sobreposto pelo autor e o modal
+   fica sempre visível (não abre/fecha). */
+.help-overlay[hidden] { display: none; }
+
 .help-box {
     position: relative;
     max-width: 420px;
@@ -299,6 +415,8 @@
 .card--xs .wind-block { padding: 0 8px; }
 .card--xs .rank-block { padding: 0 7px; }
 .card--xs .rank-row, .card--xs .peak-row { font-size: 12px; line-height: 16px; }
+.card--xs .temp-item--top .temp-v { font-size: 34px; line-height: 38px; }
+.card--xs .temp-item--rest .temp-v { font-size: 14px; line-height: 16px; }
 
 .card--xxs .wind-grid { grid-template-columns: 1fr; }
 .card--xxs .wind-block + .wind-block {
@@ -308,6 +426,19 @@
     padding-top: 8px;
 }
 .card--xxs .rain-rankings { grid-template-columns: 1fr; }
+
+/* Em telas estreitas as duas colunas de temperatura (Mínimas | Máximas)
+   continuam lado a lado — empilhá-las dobraria a altura da seção e o
+   divisor vertical é preservado. O VENTO não é afetado. */
+.card--xxs .temp-block { padding: 0 5px; }
+.card--xxs .temp-item--top .temp-v { font-size: 28px; line-height: 32px; }
+.card--xxs .temp-item--top .temp-st { font-size: 12px; line-height: 15px; margin-top: 0; }
+.card--xxs .temp-unit { font-size: 12px; line-height: 15px; }
+.card--xxs .temp-item--rest .temp-v { font-size: 13px; line-height: 15px; }
+.card--xxs .temp-cat { margin-bottom: 2px; }
+.card--xxs .temp-top-pos { line-height: 12px; margin-bottom: 0; }
+.card--xxs .temp-when { line-height: 13px; }
+.card--xxs .temp-item { margin-bottom: 2px; }
 .card--xxs .rank-block + .rank-block {
     border-left: 0;
     border-top: 1px solid #555960;
@@ -318,6 +449,12 @@
 .card--xxs .rain-total-value { font-size: 28px; line-height: 32px; }
 
 .card--short .vento { padding-bottom: 12px; }
+.card--short .temperatura { padding-bottom: 8px; }
+.card--short .temp-item { margin-bottom: 2px; }
+.card--short .temp-item--top { margin-bottom: 3px; }
+.card--short .temp-item--top .temp-v { font-size: 32px; line-height: 36px; }
+.card--short .temp-item--rest .temp-v { font-size: 14px; line-height: 16px; }
+.card--short .temp-when { line-height: 13px; }
 .card--short .section-title { margin-bottom: 4px; }
 .card--short .peak-when { margin-bottom: 3px; }
 .card--short .rain-total { margin-bottom: 6px; }
