@@ -74,7 +74,7 @@ todas as janelas são **[início inclusivo, fim exclusivo)**.
   valor pode persistir por dezenas de amostras — máx. **64** no período):
   - amostras **consecutivas** (intervalo ≤ `GAP_TOLERANCE_MS`) com o **mesmo
     valor exibido** (0,1 °C) formam **um único patamar = uma ocorrência**,
-    datada na 1ª amostra; uma lacuna de coleta separa patamares;
+    datada na 1ª amostra; um intervalo maior separa patamares;
   - o **mesmo valor pode reaparecer** em **outra ocorrência** temporal.
 - **Seleção**: janela mínima de **24 h aplicada às ocorrências**, separadamente
   para máximas e mínimas — mesmo princípio dos picos de vento, porém com função
@@ -127,9 +127,10 @@ todas as janelas são **[início inclusivo, fim exclusivo)**.
     chuva**. O acumulado anterior é **preservado** (nada é subtraído) e **todos
     os dias** que o intervalo atravessa ficam **incertos**, porque não é
     possível distinguir reinicialização de correção.
-  - **Lacuna** (intervalo entre amostras > 3 min): o incremento **não é
-    redistribuído**; é contabilizado no instante observado e **todos os dias**
-    atravessados pela lacuna (não só os extremos) são marcados como **incertos**.
+  - **Intervalos longos**: o incremento **não é redistribuído**; é
+    contabilizado no instante observado. Como as telemetrias do Ecowitt2TB só
+    são publicadas quando o valor muda, um intervalo longo não distingue falha
+    de coleta de período sem variação — por isso não há contagem de lacunas.
   - **Fronteira inicial**: busca-se a amostra **imediatamente anterior** ao
     início da janela (`fetchPrevSample`).
     - Se a 1ª amostra da janela coincide com `startTs`, a fronteira é **exata**:
@@ -139,6 +140,16 @@ todas as janelas são **[início inclusivo, fim exclusivo)**.
       entre dentro/fora: ele é contabilizado (preserva o total recuperável) e
       os dias tocados ficam **incertos** (nunca exatos).
     - Sem amostra anterior, nada existia antes da janela e nada se perde.
+- **Frequência de dias chuvosos** (substitui a antiga contagem de lacunas de
+  coleta): a linha sob o total mostra `Período: N dias · Dias com chuva: M`,
+  reaproveitando os totais diários já calculados (`summarizeRainDays`).
+  - `N` é o número de **dias do calendário do Sítio** abrangidos pela janela
+    (`countCalendarUnits`), incluindo dias **sem** nenhuma amostra no
+    ThingsBoard — o denominador **não** depende de haver registros.
+  - `M` conta os dias com **total diário > 0**, cada dia **uma única vez**.
+  - Dia com 0 mm **mas incerto** (queda do contador ou fronteira inicial) **não**
+    é contado como chuvoso. Esta linha **não** exibe ajustes do contador nem
+    marcas de incerteza (as marcas `≈` dos rankings continuam existindo).
 - Rankings: dias → semanas (domingo 00:00) → meses, do mais chuvoso ao menos.
   Apenas unidades com chuva > 0 entram; blocos vazios não são criados.
 - **Recorte `[start, end)`** com fim **exclusivo**: nenhuma amostra em `endTs`
@@ -149,7 +160,7 @@ todas as janelas são **[início inclusivo, fim exclusivo)**.
 
 ### Incerteza
 
-Dias com lacuna, queda do contador (ou ajuste) ou incremento na **fronteira
+Dias com queda do contador (ou ajuste) ou incremento na **fronteira
 inicial** recebem a marca `≈` (amarelo). A marca **propaga** para as semanas e
 meses afetados — inclusive a partir de dias com 0 mm. O **total recuperável é
 preservado**, mas nada disso é apresentado como medição exata.
@@ -175,7 +186,7 @@ Executados via API pública do ThingsBoard (`POST /api/auth/login/public` +
 ## Testes executados
 
 Harness em `_test.html` + `_tests.js`, rodado no Edge headless via `_serve.py`
-(não há Node no ambiente). Cobre 221 verificações, com dados sintéticos e reais:
+(não há Node no ambiente). Cobre 229 verificações, com dados sintéticos e reais:
 
 - as 13 janelas de período; limites de dia/semana/mês/ano; virada de meia-noite;
   ano bissexto; "Desde o início" (início = 1ª amostra);
@@ -194,11 +205,15 @@ Harness em `_test.html` + `_tests.js`, rodado no Edge headless via `_serve.py`
   3 picos ≥ 24 h; distribuição em > 1 ano); planejamento da agregação
   (contíguo, ≤ 500 intervalos, teto de consultas);
 - chuva: incrementos normais, virada de meia-noite, reinicialização (zera),
-  retomada/recuperação, queda para patamar não nulo, lacuna, lacuna cruzando a
-  meia-noite, **lacuna de ≥ 3 dias** (todos os dias incertos), **fronteira
-  inicial** (incremento recuperado e incerto; fronteira exata quando a 1ª
-  amostra coincide com `startTs`; incremento fora da janela não contado),
-  timestamps duplicados, fim exclusivo;
+  retomada/recuperação, queda para patamar não nulo, **intervalos longos**
+  (incremento preservado no instante observado, sem marcação de incerteza),
+  **fronteira inicial** (incremento recuperado e incerto; fronteira exata
+  quando a 1ª amostra coincide com `startTs`; incremento fora da janela não
+  contado), timestamps duplicados, fim exclusivo;
+- **frequência de dias chuvosos**: período sem chuva, todos os dias com chuva,
+  mistura de chuvosos e secos, dias **sem registro no ThingsBoard** mantidos no
+  denominador, sem duplicar dias com vários incrementos, virada de dia no fuso
+  do Sítio e dia com 0 mm **incerto** (não contado como chuvoso);
 - rankings dias/semanas/meses, **consistência total × dias × semanas × meses**
   e propagação de incerteza (inclusive a partir de dias com 0 mm);
 - **agregação com servidor simulado**: cobertura completa da janela sem truncar
@@ -206,7 +221,7 @@ Harness em `_test.html` + `_tests.js`, rodado no Edge headless via `_serve.py`
   sinalizada (`capped`) e rejeição da API tratada sem falhar;
 - **dados reais**: 3 picos de `wind_speed` (57,6 / 49,32 / 48,6) e de
   `wind_gust` (79,56 / 64,44 / 58,32); totais diários 19/09 = 11,9; 20/09 = 1,1;
-  21/09 = 42,3; 03/10 = 31,1; detecção de reset e de lacuna; 27/09 marcado
+  21/09 = 42,3; 03/10 = 31,1; detecção de reset; 27/09 marcado
   incerto; consistência contador × `rain_day` ≤ 0,2 mm nos dias sem queda.
 
 Como rodar:
@@ -231,9 +246,10 @@ seções TEMPERATURA/VENTO/CHUVA preenchidas.
    Reinicializações são detectadas e o acumulado anterior é preservado, mas
    **todos os dias** que o contador poderia ter percorrido ficam incertos (não
    se afirma exatidão).
-2. **Lacunas de coleta**: o incremento durante a lacuna é atribuído ao instante
-   observado (não é redistribuído) e **todos os dias** atravessados pela lacuna
-   ficam incertos.
+2. **Intervalos longos entre amostras**: o incremento é atribuído ao instante
+   observado (não é redistribuído). Como as telemetrias do Ecowitt2TB só são
+   publicadas quando o valor muda, a ausência de amostras não distingue falha
+   de coleta de período sem variação; por isso não há contagem de lacunas.
 3. **Fronteira inicial**: quando a janela não começa exatamente em uma amostra,
    o incremento entre a amostra anterior e a 1ª amostra da janela não é
    separável; ele é contabilizado, mas os dias tocados ficam incertos.

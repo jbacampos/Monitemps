@@ -163,7 +163,6 @@ check("chuva: nº dias", rNorm.days.length, 2);
 check("chuva: virada de meia-noite dia 1", rNorm.days[0].mm, 1);
 check("chuva: virada de meia-noite dia 2", rNorm.days[1].mm, 1);
 check("chuva: resetCount", rNorm.resetCount, 0);
-check("chuva: gapCount", rNorm.gapCount, 0);
 
 var rReset = computeRain(pts([
     [d1, 50.0],
@@ -187,21 +186,15 @@ check("chuva queda: total preservado", rDrop.total, 6.2);
 check("chuva queda: resetCount", rDrop.resetCount, 1);
 checkTrue("chuva queda: dia incerto", rDrop.days[0].uncertain);
 
-var rGap = computeRain(pts([
+// Intervalo longo entre amostras: o incremento continua sendo
+// contabilizado no instante observado (não é redistribuído) e NÃO gera
+// mais marcação de incerteza.
+var rLong = computeRain(pts([
     [d1 + M, 10.0],
-    [d1 + 3 * H, 12.0]               // lacuna de ~3 h
+    [d1 + 3 * H, 12.0]               // intervalo de ~3 h
 ]), d1, d1 + 86400000);
-check("chuva lacuna: total preservado", rGap.total, 2);
-check("chuva lacuna: gapCount", rGap.gapCount, 1);
-checkTrue("chuva lacuna: incerto", rGap.days[0].uncertain);
-
-var rGapNight = computeRain(pts([
-    [d1 + 1438 * M, 50.0],           // 23:58 dia 1
-    [d1 + 1442 * M, 52.0]            // 00:02 dia 2 (+2 após lacuna de 4 min)
-]), d1, d1 + 2 * 86400000);
-check("chuva lacuna meia-noite: total", rGapNight.total, 2);
-checkTrue("chuva lacuna meia-noite: dia 1 incerto", rGapNight.days[0].uncertain);
-checkTrue("chuva lacuna meia-noite: dia 2 incerto", rGapNight.days[1].uncertain);
+check("chuva intervalo longo: total preservado", rLong.total, 2);
+checkTrue("chuva intervalo longo: dia exato", !rLong.days[0].uncertain);
 
 var dup = dedupeSortAsc(pts([[d1, 5], [d1, 7], [d1 + M, 9]]));
 check("chuva duplicados: quantidade", dup.length, 2);
@@ -212,6 +205,83 @@ var rEdge = computeRain(pts([
     [d1 + 86400000, 20.0]
 ]), d1, d1 + 86400000);
 check("chuva: fim exclusivo", rEdge.total, 0);
+
+// ------------------------------------------------------------
+// 4b) FREQUÊNCIA DE DIAS CHUVOSOS (estatística do período)
+// ------------------------------------------------------------
+var ONE_DAY = 24 * H;
+var fd = S("2026-10-01T03:00:00Z");            // 01/10 00:00 -03
+
+// (a) Período sem chuva: nenhum dia chuvoso (o denominador é o período).
+var sDry = summarizeRainDays([
+    { dayStart: fd, mm: 0, uncertain: false }
+], 5);
+check("dias chuvosos: sem chuva -> total de dias", sDry.totalDays, 5);
+check("dias chuvosos: sem chuva -> chuvosos", sDry.rainyDays, 0);
+
+// (b) Todos os dias do período com chuva.
+var sWet = summarizeRainDays([
+    { dayStart: fd, mm: 1.2, uncertain: false },
+    { dayStart: addSiteDays(fd, 1), mm: 0.1, uncertain: false },
+    { dayStart: addSiteDays(fd, 2), mm: 20, uncertain: false }
+], 3);
+check("dias chuvosos: todos chuvosos", sWet.rainyDays, 3);
+
+// (c) Mistura de dias chuvosos e secos (0 mm não é chuvoso).
+var sMix = summarizeRainDays([
+    { dayStart: fd, mm: 0, uncertain: false },
+    { dayStart: addSiteDays(fd, 1), mm: 4.5, uncertain: false },
+    { dayStart: addSiteDays(fd, 2), mm: 0, uncertain: false },
+    { dayStart: addSiteDays(fd, 3), mm: 2.0, uncertain: false }
+], 4);
+check("dias chuvosos: mistos -> total", sMix.totalDays, 4);
+check("dias chuvosos: mistos -> chuvosos", sMix.rainyDays, 2);
+
+// (d) Dia com 0 mm PORÉM incerto não é contado como chuvoso.
+var sUnc = summarizeRainDays([
+    { dayStart: fd, mm: 3.0, uncertain: false },
+    { dayStart: addSiteDays(fd, 1), mm: 0, uncertain: true }
+], 2);
+check("dias chuvosos: incerto -> total", sUnc.totalDays, 2);
+check("dias chuvosos: incerto -> chuvosos", sUnc.rainyDays, 1);
+
+// (e) Integração: dias SEM registro no ThingsBoard continuam no denominador
+//     e vários incrementos no mesmo dia contam UMA única vez.
+var sp0 = S("2026-10-01T03:00:00Z");
+var sp1 = addSiteDays(sp0, 10);
+var rSpan = computeRain(pts([
+    [sp0 + M, 10.0],
+    [sp0 + 2 * ONE_DAY + M, 12.0],        // +2,0 no dia 3
+    [sp0 + 2 * ONE_DAY + 2 * M, 12.5],    // +0,5 no MESMO dia 3
+    [sp0 + 5 * ONE_DAY + M, 13.0]         // +0,5 no dia 6
+]), sp0, sp1);
+var uSpan = countCalendarUnits(sp0, sp1);
+check("dias chuvosos: período de 10 dias", uSpan.days, 10);
+var sSpan = summarizeRainDays(rSpan.days, uSpan.days);
+check("dias chuvosos: denominador = período", sSpan.totalDays, 10);
+check("dias chuvosos: 2 dias (sem duplicar)", sSpan.rainyDays, 2);
+
+// (f) Fronteira do dia no fuso do Sítio (UTC-3): 23:59 e 00:01 são dias
+//     diferentes e o incremento é atribuído ao dia local da amostra.
+var mg1 = S("2026-10-05T02:59:00Z");          // 04/10 23:59 -03
+var mg2 = S("2026-10-05T03:01:00Z");          // 05/10 00:01 -03
+var rMid = computeRain(pts([[mg1, 1.0], [mg2, 3.0]]), mg1, mg2 + H);
+var uMid = countCalendarUnits(mg1, mg2 + H);
+check("dias chuvosos: virada de dia -> total", uMid.days, 2);
+check("dias chuvosos: virada de dia -> chuvosos",
+    summarizeRainDays(rMid.days, uMid.days).rainyDays, 1);
+
+// (g) Dia com 0 mm atingido por queda do contador (incerto) na prática.
+var q0 = S("2026-10-08T03:00:00Z");           // 08/10 00:00 -03
+var rUnc2 = computeRain(pts([
+    [q0 + M, 5.0],
+    [q0 + ONE_DAY + M, 0.0],                  // queda -> 08 e 09/10 incertos
+    [q0 + ONE_DAY + 2 * M, 0.4]
+]), q0, q0 + 3 * ONE_DAY);
+var sUnc2 = summarizeRainDays(rUnc2.days,
+    countCalendarUnits(q0, q0 + 3 * ONE_DAY).days);
+check("dias chuvosos: reset -> total de dias", sUnc2.totalDays, 3);
+check("dias chuvosos: reset -> chuvosos", sUnc2.rainyDays, 1);
 
 // ------------------------------------------------------------
 // 5) RANKINGS (dias / semanas / meses) e condicionamento
@@ -268,7 +338,6 @@ if (window.__REAL__) {
 
     var rr = computeRain(pts(R.rain_total), R.rainStart, R.rainEnd);
     checkTrue("real chuva: reset detectado", rr.resetCount >= R.expect.minResets);
-    checkTrue("real chuva: lacuna detectada", rr.gapCount >= R.expect.minGaps);
 
     var byDay = {};
     var uncertain = {};
@@ -316,7 +385,7 @@ if (window.__REAL__) {
 }
 
 // ------------------------------------------------------------
-// 7) CORREÇÕES — fronteira inicial e lacunas multidiárias
+// 7) CORREÇÕES — fronteira inicial e intervalos longos
 // ------------------------------------------------------------
 var DAY = 86400000;
 var bs = S("2026-10-02T03:00:00Z");            // 02/10 00:00 -03
@@ -357,16 +426,17 @@ check("fim exclusivo: total", rEndEx.total, 0.3);
 checkTrue("fim exclusivo: sem incerteza de fronteira (delta 0)",
     !rEndEx.days[0].uncertain);
 
-// (e) Lacuna atravessando >= 3 dias: TODOS os dias tocados incertos.
+// (e) Intervalo >= 3 dias entre amostras: o incremento é atribuído ao
+//     instante observado e nenhum dia é marcado como incerto.
 var gs = S("2026-10-10T03:00:00Z");
-var rGap3 = computeRain(pts([
+var rLong3 = computeRain(pts([
     [gs, 10.0],
     [gs + 3 * DAY + M, 20.0]
 ]), gs, gs + 5 * DAY);
-check("lacuna 3 dias: total", rGap3.total, 10);
-check("lacuna 3 dias: nº dias", rGap3.days.length, 4);
-checkTrue("lacuna 3 dias: todos incertos",
-    rGap3.days.every(function (d) { return d.uncertain; }));
+check("intervalo longo: total", rLong3.total, 10);
+check("intervalo longo: nº dias", rLong3.days.length, 1);
+checkTrue("intervalo longo: sem incerteza",
+    rLong3.days.every(function (d) { return !d.uncertain; }));
 
 // (f) Reset do contador seguido de recuperação.
 var rs = S("2026-10-12T03:00:00Z");
@@ -400,8 +470,9 @@ var sumMo = rkCons.months.reduce(function (a, m) { return a + m.mm; }, 0);
 check("consistência: soma semanas == total", Math.round(sumWk * 100) / 100, 13);
 check("consistência: soma meses == total", Math.round(sumMo * 100) / 100, 13);
 
-// A incerteza de um dia sem chuva (0 mm, mas atingido por lacuna) deve
-// propagar para a semana/mês (nenhum acumulado incerto aparece exato).
+// A incerteza de um dia sem chuva (0 mm, mas atingido por queda do
+// contador) deve propagar para a semana/mês (nenhum acumulado incerto
+// aparece exato).
 var rkUnc = buildRainRankings([
     { dayStart: S("2026-10-04T03:00:00Z"), mm: 5.0, uncertain: false },
     { dayStart: S("2026-10-06T03:00:00Z"), mm: 0, uncertain: true }

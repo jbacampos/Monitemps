@@ -64,8 +64,8 @@ const AGG_MAX_REQUESTS = 20;            // teto de sub-consultas por chave
 const AGG_PAGE_LIMIT = 5000;            // limite de buckets por resposta
 const RAW_REFINE_PAGES = 4;             // páginas cruas por candidato
 
-// Lacuna de coleta: intervalo entre amostras acima disso torna a
-// atribuição temporal incerta (não é redistribuída).
+// Intervalo máximo entre amostras consecutivas para considerá-las
+// adjacentes (usado no critério de "ocorrência distinta" da temperatura).
 const GAP_TOLERANCE_MS = 3 * 60 * 1000; // 3 minutos (> 3× a cadência)
 
 // Abaixo deste valor (mm) a unidade exibiria "0,0 mm" e não entra
@@ -498,7 +498,7 @@ function selectPeaks(points, minGapMs, topN) {
 // Critério de "ocorrência distinta" (temperature_out):
 //   • amostras CONSECUTIVAS (intervalo <= GAP_TOLERANCE_MS) com o MESMO
 //     valor exibido (0,1 °C) formam um único patamar = UMA ocorrência,
-//     datada na 1ª amostra. Uma lacuna de coleta separa patamares.
+//     datada na 1ª amostra. Um intervalo maior separa patamares.
 //   • O MESMO valor PODE reaparecer em OUTRA ocorrência temporal.
 //   • Máximas ordenadas por temperatura DECRESCENTE; mínimas CRESCENTE;
 //     empate -> horário MAIS ANTIGO. Não se inventam valores/horários.
@@ -982,22 +982,44 @@ function renderRankBlock(title, items, labelFn) {
         '<div class="rank-title">' + title + "</div>" + rows + "</div>";
 }
 
+// Estatística do período: total de dias do calendário do Sítio abrangidos
+// pela janela e quantos tiveram chuva (total diário > 0). Reaproveita os
+// totais diários já calculados por `computeRain` (nenhuma segunda
+// acumulação). Um dia com 0 mm mas INCERTO (queda do contador ou fronteira
+// inicial) simplesmente não é contado como chuvoso.
+function summarizeRainDays(rainDays, totalDays) {
+    let rainyDays = 0;
+
+    rainDays.forEach(function (d) {
+        if (d.mm > 0) {
+            rainyDays++;
+        }
+    });
+
+    return {
+        totalDays: totalDays,
+        rainyDays: rainyDays
+    };
+}
+
 function renderRain(rain, rankings, units, capped) {
     setText("rainTotal", format1(rain.total));
 
-    let note = "";
+    // Linha do período (substitui a antiga contagem de lacunas de coleta).
+    // O denominador vem do PERÍODO abrangido (countCalendarUnits), não da
+    // quantidade de dias com amostras no ThingsBoard. Ajustes do contador e
+    // marcas de incerteza NÃO são exibidos nesta linha.
+    const stats = summarizeRainDays(rain.days, units.days);
+
+    let note = "Período: " + stats.totalDays +
+        (stats.totalDays === 1 ? " dia" : " dias") +
+        " · Dias com chuva: " + stats.rainyDays;
 
     if (capped) {
-        note += "Leitura limitada pelo volume de histórico; total parcial. ";
-    }
-    if (rain.resetCount) {
-        note += "Ajustes do contador (" + rain.resetCount + "×). ";
-    }
-    if (rain.gapCount) {
-        note += rain.gapCount + " lacuna(s) de coleta. ";
+        note += " Leitura limitada pelo volume de histórico; total parcial.";
     }
 
-    setText("rainTotalNote", note ? note + "Marcas " + "\u2248" + " = incerto." : "");
+    setText("rainTotalNote", note);
 
     const blocks = [];
 
@@ -1190,10 +1212,9 @@ function reload() {
 //     amostra em que o aumento foi OBSERVADO;
 //   • delta < 0  -> REINICIALIZAÇÃO do contador: não é chuva
 //     (a queda é ignorada) e o dia é marcado como incerto;
-//   • lacuna (intervalo > GAP_TOLERANCE_MS) ou reinício do contador: o
-//     incremento NÃO é redistribuído; ele é contabilizado no instante
-//     observado e TODOS os dias que o intervalo/lacuna atravessa ficam
-//     marcados como incertos;
+//   • reinício do contador: o incremento NÃO é redistribuído; ele é
+//     contabilizado no instante observado e TODOS os dias que o intervalo
+//     atravessa ficam marcados como incertos;
 //   • fronteira inicial: a 1ª amostra da janela é medida em relação à
 //     amostra imediatamente anterior (prevPoint). Se ela não coincidir com
 //     startTs, esse incremento cruza a fronteira e não é separável -> é
@@ -1204,7 +1225,6 @@ function reload() {
 function computeRain(points, startTs, endTs, prevPoint) {
     const dayMap = new Map();
     let resetCount = 0;
-    let gapCount = 0;
 
     function dayEntry(dayStart) {
         if (!dayMap.has(dayStart)) {
@@ -1214,8 +1234,8 @@ function computeRain(points, startTs, endTs, prevPoint) {
     }
 
     // Marca como incertos TODOS os dias de calendário tocados por
-    // [fromTs, toTs]. O incremento observado no fim de uma lacuna (ou de um
-    // reinício do contador) pode ter ocorrido em qualquer dia do intervalo;
+    // [fromTs, toTs]. O incremento observado no fim de um reinício do
+    // contador pode ter ocorrido em qualquer dia do intervalo;
     // a incerteza é propagada a todos eles. O incremento NÃO é redistribuído.
     function markRangeUncertain(fromTs, toTs) {
         let d = startOfSiteDay(fromTs);
@@ -1247,13 +1267,8 @@ function computeRain(points, startTs, endTs, prevPoint) {
                 resetCount++;
                 markRangeUncertain(prevPoint.ts, first.ts);
             } else if (bDelta > 0) {
-                if ((first.ts - prevPoint.ts) > GAP_TOLERANCE_MS) {
-                    gapCount++;
-                }
                 dayEntry(startOfSiteDay(first.ts)).mm += bDelta;
                 markRangeUncertain(prevPoint.ts, first.ts);
-            } else if ((first.ts - prevPoint.ts) > GAP_TOLERANCE_MS) {
-                gapCount++;
             }
         }
     }
@@ -1282,11 +1297,6 @@ function computeRain(points, startTs, endTs, prevPoint) {
             continue;
         }
 
-        if ((cur.ts - prev.ts) > GAP_TOLERANCE_MS) {
-            gapCount++;
-            markRangeUncertain(prev.ts, cur.ts);
-        }
-
         dayEntry(startOfSiteDay(cur.ts)).mm += delta;
     }
 
@@ -1301,8 +1311,7 @@ function computeRain(points, startTs, endTs, prevPoint) {
     return {
         total: Math.round(total * 100) / 100,
         days: days,
-        resetCount: resetCount,
-        gapCount: gapCount
+        resetCount: resetCount
     };
 }
 

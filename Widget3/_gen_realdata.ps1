@@ -61,7 +61,7 @@ Write-Host "wind_gust  top3: $wgVals"
 
 $expect = '{"windSpeed":[' + $wsVals + '],"windGust":[' + $wgVals + ']' +
     ',"daily":{"2026-09-19":11.9,"2026-09-20":1.1,"2026-09-21":42.3,"2026-10-03":31.1}' +
-    ',"minResets":1,"minGaps":1}'
+    ',"minResets":1}'
 
 $out = "window.__REAL__={generatedAt:$now,rainStart:$start,rainEnd:$now," +
     "wind_speed:" + (Pairs $ws) + ",wind_gust:" + (Pairs $wg) + ",rain_total:" + (Pairs $rt) +
