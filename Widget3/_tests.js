@@ -283,6 +283,22 @@ var sUnc2 = summarizeRainDays(rUnc2.days,
 check("dias chuvosos: reset -> total de dias", sUnc2.totalDays, 3);
 check("dias chuvosos: reset -> chuvosos", sUnc2.rainyDays, 1);
 
+// (h) Rótulo do total: dias inteiros x período com dias parciais.
+check("dias período: ontem (1 dia inteiro)",
+    formatPeriodDays(countCalendarUnits(S("2026-10-06T03:00:00Z"),
+        S("2026-10-07T03:00:00Z"))), "(1 dia)");
+check("dias período: setembro inteiro (30 dias)",
+    formatPeriodDays(countCalendarUnits(S("2026-09-01T03:00:00Z"),
+        S("2026-10-01T03:00:00Z"))), "(30 dias)");
+check("dias período: últimas 24h -> parcial",
+    formatPeriodDays(countCalendarUnits(NOW - 24 * H, NOW)), "(≈2 dias)");
+check("dias período: fim em 'agora' -> parcial",
+    formatPeriodDays(countCalendarUnits(S("2026-10-01T03:00:00Z"), NOW)),
+    "(≈7 dias)");
+check("dias período: início no meio do dia -> parcial",
+    formatPeriodDays(countCalendarUnits(S("2026-10-01T15:00:00Z"),
+        S("2026-10-04T03:00:00Z"))), "(≈3 dias)");
+
 // ------------------------------------------------------------
 // 5) RANKINGS (dias / semanas / meses) e condicionamento
 // ------------------------------------------------------------

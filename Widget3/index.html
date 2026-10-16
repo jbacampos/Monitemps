@@ -71,7 +71,7 @@
         <div class="section-title">CHUVA</div>
 
         <div class="rain-total">
-            <div class="rain-total-label">Total no período</div>
+            <div class="rain-total-label">Total no período <span id="rainPeriodDays"></span></div>
             <div class="rain-total-value">
                 <span id="rainTotal">--.-</span>
                 <span class="item-unit">mm</span>
@@ -110,7 +110,10 @@
                 <div class="help-text">
                     <strong>Chuva:</strong> acumulados obtidos pelos incrementos do
                     contador do pluviômetro WH40H. Quedas do contador
-                    (reinicializações ou ajustes) não são contadas como chuva.
+                    (reinicializações ou ajustes) não são contadas como chuva. O
+                    título do total indica quantos dias o período abrange (com
+                    <span class="unc">≈</span> quando inclui dias parciais) e a linha
+                    abaixo, em quantos dias houve chuva.
                 </div>
                 <div class="help-text">
                     <strong>Incerteza:</strong> dias marcados com <span class="unc">≈</span>

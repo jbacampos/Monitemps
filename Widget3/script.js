@@ -1002,21 +1002,28 @@ function summarizeRainDays(rainDays, totalDays) {
     };
 }
 
+// Rótulo do total: `(31 dias)` ou `(≈3 dias)` quando o período não é
+// composto só por dias inteiros (a marca de incerteza indica quantidade
+// parcial, incluindo o primeiro/último dia incompletos).
+function formatPeriodDays(units) {
+    return "(" + (units.wholeDays ? "" : "\u2248") + units.days +
+        (units.days === 1 ? " dia" : " dias") + ")";
+}
+
 function renderRain(rain, rankings, units, capped) {
     setText("rainTotal", format1(rain.total));
 
-    // Linha do período (substitui a antiga contagem de lacunas de coleta).
-    // O denominador vem do PERÍODO abrangido (countCalendarUnits), não da
-    // quantidade de dias com amostras no ThingsBoard. Ajustes do contador e
-    // marcas de incerteza NÃO são exibidos nesta linha.
+    // Rótulo do total com o nº de dias do período (o denominador vem do
+    // PERÍODO abrangido, não da quantidade de dias com amostras no TB) e,
+    // abaixo, quantos dias tiveram chuva.
     const stats = summarizeRainDays(rain.days, units.days);
 
-    let note = "Período: " + stats.totalDays +
-        (stats.totalDays === 1 ? " dia" : " dias") +
-        " · Dias com chuva: " + stats.rainyDays;
+    setText("rainPeriodDays", formatPeriodDays(units));
+
+    let note = "Dias com chuva: " + stats.rainyDays;
 
     if (capped) {
-        note += " Leitura limitada pelo volume de histórico; total parcial.";
+        note += " · Leitura limitada pelo volume de histórico; total parcial.";
     }
 
     setText("rainTotalNote", note);
@@ -1065,6 +1072,7 @@ function renderEmpty(message) {
     renderTemperature({ maxs: [], mins: [] });
     setText("tempNote", "");
     setText("rainTotal", "---");
+    setText("rainPeriodDays", "");
     setText("rainTotalNote", "");
     setHtml("rainRankings",
         '<div class="rank-empty">' + (message || "Sem dados no período.") + "</div>");
@@ -1379,7 +1387,12 @@ function countCalendarUnits(startTs, endTs) {
         m = addSiteMonths(m, 1);
     }
 
-    return { days: days, weeks: weeks, months: months };
+    // Período composto APENAS por dias inteiros do calendário do Sítio:
+    // início e fim caem exatamente na meia-noite local.
+    const wholeDays = startOfSiteDay(startTs) === startTs &&
+        startOfSiteDay(endTs) === endTs;
+
+    return { days: days, weeks: weeks, months: months, wholeDays: wholeDays };
 }
 
 // ============================================================
