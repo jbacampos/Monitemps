@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MoniTemps — Widget 1 SÍTIO (preview local)</title>
+<style>
+html,body{margin:0;min-height:100%;background:#202328;color:#eee;font-family:Inter,Arial,sans-serif}
+body{padding:20px;box-sizing:border-box}
+.preview-header{margin:0 0 10px;font-size:13px;color:#c8ccd1}
+#widget{width:min(100%,560px);height:380px;margin:auto}
+.preview-note{margin:8px auto 0;max-width:560px;font-size:11px;line-height:16px;color:#8b929c}
+.preview-checks{margin:8px auto 0;max-width:560px;font-size:12px;line-height:17px;color:#c8ccd1}
+.preview-checks .ok{color:#9bc53d}
+.preview-checks .fail{color:#ff8080}
+</style>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="preview-header">MoniTemps — Widget 1 SÍTIO (preview local, dados simulados)</div>
+<div id="widget"></div>
+<div class="preview-note">Redimensione a janela para testar telas menores. Valores ilustrativos: 22,0 °C / 66,8% / 22,0 °C / 1016 hPa / 15,5 °C / 457 W/m² e 22,2 °C / 70,4%.</div>
+<div id="previewChecks" class="preview-checks"></div>
+
+<script>
+// ------------------------------------------------------------
+// Ambiente de teste (NÃO faz parte do widget).
+// Simula container, ctx e o dispositivo do Sítio (Ecowitt).
+// ------------------------------------------------------------
+const container = document.getElementById("widget");
+window.container = container;
+
+const PREVIEW_DEVICE_ECOWITT = "63eaff60-b030-11f1-940d-1f4ee055f09a";
+
+// Timestamp recente para o preview não aparecer "atrasado".
+const now = Date.now() - 60 * 1000;
+
+const telemetry = {
+    temperature_out: { timestamp: now, value: "22.0" },
+    humidity_out: { timestamp: now, value: "66.8" },
+    feels_like_out: { timestamp: now, value: "22.0" },
+    pressure_relative: { timestamp: now, value: "1016" },
+    dew_point_out: { timestamp: now, value: "15.5" },
+    solar_radiation: { timestamp: now, value: "457" },
+    temperature_in: { timestamp: now, value: "22.2" },
+    humidity_in: { timestamp: now, value: "70.4" }
+};
+
+const ctx = {
+    http: {
+        get: function (url) {
+            return {
+                subscribe: function (ok) {
+                    const match = /keys=([^&]+)/.exec(url);
+                    const keys = match
+                        ? decodeURIComponent(match[1]).split(",").filter(Boolean)
+                        : [];
+                    const response = {};
+                    keys.forEach(function (key) {
+                        if (telemetry[key]) {
+                            response[key] = [{
+                                ts: telemetry[key].timestamp,
+                                value: telemetry[key].value
+                            }];
+                        }
+                    });
+                    ok(response);
+                    return { unsubscribe: function () {} };
+                }
+            };
+        }
+    },
+    subscriptionApi: {
+        createSubscription: function (options) {
+            return {
+                subscribe: function (fn) {
+                    const keys = [];
+                    (options.datasources || []).forEach(function (ds) {
+                        (ds.dataKeys || []).forEach(function (key) {
+                            keys.push(key.name);
+                        });
+                    });
+                    const data = keys.map(function (name) {
+                        const point = telemetry[name];
+                        return {
+                            dataKey: { name: name },
+                            datasource: {
+                                entityFilter: {
+                                    singleEntity: { id: PREVIEW_DEVICE_ECOWITT }
+                                }
+                            },
+                            data: point
+                                ? [[point.timestamp, point.value]]
+                                : []
+                        };
+                    });
+                    const subscription = { data: data };
+                    if (options.callbacks &&
+                        typeof options.callbacks.onDataUpdated === "function") {
+                        options.callbacks.onDataUpdated(subscription);
+                    }
+                    fn(subscription);
+                    return { unsubscribe: function () {} };
+                }
+            };
+        }
+    }
+};
+
+window.__errors = [];
+window.__checks = [];
+window.onerror = function (message) {
+    window.__errors.push(String(message));
+};
+
+// ------------------------------------------------------------
+// Verificações automáticas do preview.
+// ------------------------------------------------------------
+const expected = {
+    "#sitioExtTemp": "22.0",
+    "#sitioExtHumid": "66.8",
+    "#sitioExtFeels": "22.0",
+    "#sitioExtPressure": "1016",
+    "#sitioExtDew": "15.5",
+    "#sitioExtSolar": "457",
+    "#sitioIntTemp": "22.2",
+    "#sitioIntHumid": "70.4"
+};
+
+function textOf(selector) {
+    const el = container.querySelector(selector);
+    return el ? el.textContent.trim() : null;
+}
+
+function layoutResults() {
+    const results = [];
+    function check(name, ok) {
+        results.push({ name: name, ok: !!ok });
+    }
+
+    const card = container.querySelector(".card");
+    const externo = container.querySelector(".section.externo");
+    const interno = container.querySelector(".section.interno");
+    const temps = Array.prototype.slice.call(container.querySelectorAll(".temp"));
+
+    if (!card || !externo || !interno || temps.length !== 2) {
+        check("estrutura do card (seções Externo/Interno)", false);
+        return results;
+    }
+
+    // ----------------------------------------------------------
+    // Cada seção tem a sua própria grade de dados, abaixo da
+    // respectiva temperatura.
+    // ----------------------------------------------------------
+    [externo, interno].forEach(function (section, index) {
+        const name = index === 0 ? "Externo" : "Interno";
+        const labels = Array.prototype.slice.call(section.querySelectorAll(".data-label"));
+        const values = Array.prototype.slice.call(section.querySelectorAll(".data-value"));
+
+        if (!labels.length || labels.length !== values.length) {
+            check("estrutura da grade de dados (" + name + ")", false);
+            return;
+        }
+
+        const labelLefts = labels.map(function (el) {
+            return Math.round(el.getBoundingClientRect().left);
+        });
+        const valueRights = values.map(function (el) {
+            return Math.round(el.getBoundingClientRect().right);
+        });
+
+        check(name + ": rótulos alinhados à esquerda [" + labelLefts.join(",") + "]",
+            new Set(labelLefts).size === 1);
+        check(name + ": valores alinhados à direita [" + valueRights.join(",") + "]",
+            new Set(valueRights).size === 1);
+        check(name + ": sem sobreposição entre rótulo e valor", labels.every(function (el, i) {
+            return el.getBoundingClientRect().right <= values[i].getBoundingClientRect().left;
+        }));
+        check(name + ": rótulo e valor na mesma linha", labels.every(function (el, i) {
+            return Math.abs(el.getBoundingClientRect().top - values[i].getBoundingClientRect().top) <= 1;
+        }));
+
+        // A temperatura precisa ficar centralizada na própria coluna.
+        const style = getComputedStyle(section);
+        const rect = section.getBoundingClientRect();
+        const contentCenter =
+            (rect.left + parseFloat(style.paddingLeft) +
+             rect.right - parseFloat(style.paddingRight)) / 2;
+
+        const temp = section.querySelector(".temp");
+        const children = Array.prototype.slice.call(temp.children);
+        const left = Math.min.apply(null, children.map(function (c) {
+            return c.getBoundingClientRect().left;
+        }));
+        const right = Math.max.apply(null, children.map(function (c) {
+            return c.getBoundingClientRect().right;
+        }));
+
+        check(name + ": temperatura centralizada na coluna",
+            Math.abs((left + right) / 2 - contentCenter) <= 2);
+
+        // As informações complementares vêm abaixo da temperatura.
+        const grid = section.querySelector(".data-grid");
+
+        check(name + ": informações complementares abaixo da temperatura",
+            grid.getBoundingClientRect().top >=
+            temp.getBoundingClientRect().bottom - 1);
+    });
+
+    // ----------------------------------------------------------
+    // Externo e Interno lado a lado.
+    // ----------------------------------------------------------
+    const extRect = externo.getBoundingClientRect();
+    const intRect = interno.getBoundingClientRect();
+
+    check("seções Externo e Interno lado a lado",
+        extRect.right <= intRect.left + 1 &&
+        Math.abs(extRect.top - intRect.top) <= 1);
+
+    check("temperaturas na mesma linha",
+        Math.abs(temps[0].getBoundingClientRect().top -
+                 temps[1].getBoundingClientRect().top) <= 1);
+
+    check("seções com a mesma altura",
+        Math.abs(extRect.height - intRect.height) <= 1);
+
+    const dividerWidth = parseFloat(getComputedStyle(interno).borderLeftWidth);
+
+    check("divisor vertical entre as colunas (" + dividerWidth + "px)",
+        dividerWidth > 0);
+
+    // Título da localidade no mesmo tamanho do título de seção
+    // (referência: título VENTO do Widget 2).
+    const locationTitle = container.querySelector(".location-title");
+    const sectionTitle = container.querySelector(".section-title");
+    const locationSize = parseFloat(getComputedStyle(locationTitle).fontSize);
+    const sectionSize = parseFloat(getComputedStyle(sectionTitle).fontSize);
+
+    check("título SÍTIO com " + locationSize + "px, igual ao título de seção (" +
+        sectionSize + "px)", locationSize === sectionSize && locationSize >= 20);
+
+    check("sem transbordo horizontal", card.scrollWidth <= card.clientWidth + 1);
+
+    return results;
+}
+
+function valueResults() {
+    const results = [];
+
+    Object.keys(expected).forEach(function (selector) {
+        const got = textOf(selector);
+        results.push({
+            name: "valor " + selector + " = " + expected[selector] +
+                " (obtido: " + got + ")",
+            ok: got === expected[selector]
+        });
+    });
+
+    return results;
+}
+
+function runChecks() {
+    // Exercita o caminho do refresh manual (o mock responde de forma síncrona).
+    const refresh = container.querySelector("#refreshButton");
+
+    if (refresh) {
+        refresh.click();
+    }
+
+    const results = layoutResults().concat(valueResults());
+
+    if (refresh) {
+        results.push({
+            name: "refresh manual reabilita o botão",
+            ok: refresh.disabled === false
+        });
+    }
+
+    if (window.__errors.length) {
+        results.push({
+            name: "erros de JavaScript: " + window.__errors.join(" | "),
+            ok: false
+        });
+    }
+
+    window.__checks = results;
+    window.__text = container.innerText;
+
+    const target = document.getElementById("previewChecks");
+    const failed = results.filter(function (r) { return !r.ok; });
+
+    target.innerHTML = results.map(function (r) {
+        return '<div class="' + (r.ok ? "ok" : "fail") + '">' +
+            (r.ok ? "OK" : "FALHA") + " — " + r.name +
+            "</div>";
+    }).join("") +
+    '<div class="' + (failed.length ? "fail" : "ok") + '">' +
+    (results.length - failed.length) + "/" + results.length +
+    " verificações OK</div>";
+}
+
+window.addEventListener("resize", function () {
+    setTimeout(runChecks, 100);
+});
+
+fetch("index.html").then(function (r) { return r.text(); }).then(function (html) {
+    container.innerHTML = html;
+
+    const s = document.createElement("script");
+    s.src = "script.js";
+    s.onload = function () { setTimeout(runChecks, 200); };
+    s.onerror = function () { window.__errors.push("falha ao carregar script.js"); };
+    document.body.appendChild(s);
+});
+</script>
+</body>
+</html>

@@ -141,15 +141,23 @@ todas as janelas são **[início inclusivo, fim exclusivo)**.
       os dias tocados ficam **incertos** (nunca exatos).
     - Sem amostra anterior, nada existia antes da janela e nada se perde.
 - **Frequência de dias chuvosos** (substitui a antiga contagem de lacunas de
-  coleta): o rótulo do total mostra `Total no período (N dias)` e, abaixo da
-  precipitação, `Dias com chuva: M` — reaproveitando os totais diários já
-  calculados (`summarizeRainDays`).
-  - `N` é o número de **dias do calendário do Sítio** abrangidos pela janela
-    (`countCalendarUnits`), incluindo dias **sem** nenhuma amostra no
+  coleta): o rótulo do total mostra `Total no período (N dias observados)` e,
+  abaixo da precipitação, `Dias com chuva: M` — reaproveitando os totais diários
+  já calculados (`summarizeRainDays`).
+  - `N` é o número de **dias do calendário do Sítio** observados na janela
+    (`observedPeriodDays`), incluindo dias **sem** nenhuma amostra no
     ThingsBoard — o denominador **não** depende de haver registros.
-  - Quando o período **não** é composto só por dias inteiros (início e/ou fim
-    fora da meia-noite local), o rótulo usa a marca de incerteza para indicar a
-    **quantidade parcial**: `(≈3 dias)` (`formatPeriodDays`).
+  - Quando a **1ª coleta** do dispositivo caiu **dentro** do período, a contagem
+    começa no **dia em que ela ocorreu** (`observedStartTs`): dias civis
+    anteriores ao início das coletas não entram no denominador (senão períodos
+    longos, como "Ano atual", ficariam distorcidos). Se a 1ª coleta é anterior
+    ao período (ou desconhecida), vale o início da janela.
+  - Se a 1ª coleta é **posterior** ao período (o dispositivo ainda não
+    coletava naquele intervalo, como em "Ano passado"/"Ano retrasado"), o
+    rótulo mostra **`(0 dias observados)`** — e não os dias civis da janela.
+  - Quando o período contado **não** é composto só por dias inteiros (início
+    e/ou fim fora da meia-noite local), o rótulo usa a marca de incerteza para
+    indicar a **quantidade parcial**: `(≈24 dias observados)` (`formatPeriodDays`).
   - `M` conta os dias com **total diário > 0**, cada dia **uma única vez**.
   - Dia com 0 mm **mas incerto** (queda do contador ou fronteira inicial) **não**
     é contado como chuvoso. Esta linha **não** exibe ajustes do contador nem
@@ -190,7 +198,7 @@ Executados via API pública do ThingsBoard (`POST /api/auth/login/public` +
 ## Testes executados
 
 Harness em `_test.html` + `_tests.js`, rodado no Edge headless via `_serve.py`
-(não há Node no ambiente). Cobre 234 verificações, com dados sintéticos e reais:
+(não há Node no ambiente). Cobre 242 verificações, com dados sintéticos e reais:
 
 - as 13 janelas de período; limites de dia/semana/mês/ano; virada de meia-noite;
   ano bissexto; "Desde o início" (início = 1ª amostra);
@@ -217,8 +225,9 @@ Harness em `_test.html` + `_tests.js`, rodado no Edge headless via `_serve.py`
 - **frequência de dias chuvosos**: período sem chuva, todos os dias com chuva,
   mistura de chuvosos e secos, dias **sem registro no ThingsBoard** mantidos no
   denominador, sem duplicar dias com vários incrementos, virada de dia no fuso
-  do Sítio, dia com 0 mm **incerto** (não contado como chuvoso) e rótulo do
-  período com dias inteiros x parciais;
+  do Sítio, dia com 0 mm **incerto** (não contado como chuvoso), rótulo do
+  período com dias inteiros x parciais, contagem a partir do dia da 1ª coleta e
+  período anterior à coleta (0 dias observados);
 - rankings dias/semanas/meses, **consistência total × dias × semanas × meses**
   e propagação de incerteza (inclusive a partir de dias com 0 mm);
 - **agregação com servidor simulado**: cobertura completa da janela sem truncar

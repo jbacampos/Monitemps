@@ -1002,23 +1002,23 @@ function summarizeRainDays(rainDays, totalDays) {
     };
 }
 
-// Rótulo do total: `(31 dias)` ou `(≈3 dias)` quando o período não é
-// composto só por dias inteiros (a marca de incerteza indica quantidade
-// parcial, incluindo o primeiro/último dia incompletos).
-function formatPeriodDays(units) {
-    return "(" + (units.wholeDays ? "" : "\u2248") + units.days +
-        (units.days === 1 ? " dia" : " dias") + ")";
+// Rótulo do total: `(31 dias observados)` ou `(≈24 dias observados)` quando o
+// período (ou o trecho contado) não é composto só por dias inteiros — a marca
+// de incerteza indica quantidade parcial.
+function formatPeriodDays(observed) {
+    return "(" + (observed.wholeDays ? "" : "\u2248") + observed.days +
+        (observed.days === 1 ? " dia observado" : " dias observados") + ")";
 }
 
-function renderRain(rain, rankings, units, capped) {
+function renderRain(rain, rankings, units, capped, observed) {
     setText("rainTotal", format1(rain.total));
 
-    // Rótulo do total com o nº de dias do período (o denominador vem do
-    // PERÍODO abrangido, não da quantidade de dias com amostras no TB) e,
-    // abaixo, quantos dias tiveram chuva.
+    // Rótulo do total com o nº de dias OBSERVADOS do período (o denominador
+    // não depende de haver amostras no TB) e, abaixo, quantos dias tiveram
+    // chuva.
     const stats = summarizeRainDays(rain.days, units.days);
 
-    setText("rainPeriodDays", formatPeriodDays(units));
+    setText("rainPeriodDays", formatPeriodDays(observed));
 
     let note = "Dias com chuva: " + stats.rainyDays;
 
@@ -1151,6 +1151,15 @@ function reload() {
         const start = spec.start;
         const end = spec.end;
 
+        // 1ª coleta do dispositivo (usada só para contar os dias observados).
+        // Em "Desde o início" ela é o próprio início da janela; nos demais
+        // períodos é consultada em paralelo (1 amostra) até AGORA — e não até o
+        // fim da janela — para que períodos anteriores à coleta (ex.: "Ano
+        // passado") resultem em 0 dias observados em vez dos dias civis.
+        const firstTsJob = spec.desdeInicio
+            ? Promise.resolve(start)
+            : fetchFirstTs("rain_total", now);
+
         const tempJobs = [
             fetchRaw(TEMP_KEY, start, end),
             fetchRaw(TEMP_FEELS_KEY, start, end)
@@ -1161,7 +1170,7 @@ function reload() {
             findTopPeaks("wind_gust", start, end, log),
             fetchRaw("rain_total", start, end),
             fetchPrevSample("rain_total", start)
-        ].concat(tempJobs)).then(function (res) {
+        ].concat(tempJobs, [firstTsJob])).then(function (res) {
             if (token !== reloadToken) {
                 return;
             }
@@ -1194,8 +1203,9 @@ function reload() {
             const rain = computeRain(res[2].points, start, end, res[3]);
             const rankings = buildRainRankings(rain.days);
             const units = countCalendarUnits(start, end);
+            const observed = observedPeriodDays(start, end, res[6]);
 
-            renderRain(rain, rankings, units, res[2].capped);
+            renderRain(rain, rankings, units, res[2].capped, observed);
             updateLastUpdate(res[2].points);
         });
     }).catch(function (err) {
@@ -1393,6 +1403,43 @@ function countCalendarUnits(startTs, endTs) {
         startOfSiteDay(endTs) === endTs;
 
     return { days: days, weeks: weeks, months: months, wholeDays: wholeDays };
+}
+
+// Início efetivo da contagem de dias OBSERVADOS:
+//   • 1ª coleta DENTRO da janela -> a contagem começa no DIA em que ela
+//     ocorreu (evita incluir dias civis anteriores ao início das coletas);
+//   • 1ª coleta ANTES da janela  -> vale o início original da janela;
+//   • 1ª coleta DEPOIS da janela -> null: nenhum dia observado no período;
+//   • 1ª coleta desconhecida     -> vale o início original da janela.
+function observedStartTs(startTs, endTs, firstTs) {
+    if (firstTs == null) {
+        return startTs;
+    }
+
+    if (firstTs >= endTs) {
+        return null;
+    }
+
+    if (firstTs <= startTs) {
+        return startTs;
+    }
+
+    return startOfSiteDay(firstTs);
+}
+
+// Dias observados do período (do início efetivo até o fim da janela). Sem
+// coleta dentro do período (ex.: "Ano passado", anterior ao dispositivo),
+// são 0 dias observados — e não os dias civis da janela.
+function observedPeriodDays(startTs, endTs, firstTs) {
+    const observedStart = observedStartTs(startTs, endTs, firstTs);
+
+    if (observedStart === null) {
+        return { days: 0, wholeDays: true };
+    }
+
+    const units = countCalendarUnits(observedStart, endTs);
+
+    return { days: units.days, wholeDays: units.wholeDays };
 }
 
 // ============================================================

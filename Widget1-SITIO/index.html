@@ -1,0 +1,102 @@
+<div class="card sitio">
+
+    <!-- ==================== LOCALIDADE ==================== -->
+    <div class="location-title">SÍTIO</div>
+
+
+    <!-- ============ EXTERNO E INTERNO LADO A LADO ============ -->
+    <div class="sections">
+
+        <!-- ==================== EXTERNO ==================== -->
+        <section class="section externo">
+
+            <div class="section-title">Externo</div>
+
+            <div class="temp">
+                <span id="sitioExtTemp">--.-</span>
+                <span class="unit">°C</span>
+            </div>
+
+            <div class="data-grid">
+
+                <div class="data-line">
+                    <span class="data-label">Umidade relativa do ar</span>
+                    <span class="data-value"><b id="sitioExtHumid">--.-</b> <i>%</i></span>
+                </div>
+
+                <div class="data-line">
+                    <span class="data-label">Sensação térmica</span>
+                    <span class="data-value"><b id="sitioExtFeels">--.-</b> <i>°C</i></span>
+                </div>
+
+                <div class="data-line">
+                    <span class="data-label">Pressão atmosférica</span>
+                    <span class="data-value"><b id="sitioExtPressure">----</b> <i>hPa</i></span>
+                </div>
+
+                <div class="data-line">
+                    <span class="data-label">Ponto de orvalho</span>
+                    <span class="data-value"><b id="sitioExtDew">--.-</b> <i>°C</i></span>
+                </div>
+
+                <div class="data-line">
+                    <span class="data-label">Radiação solar</span>
+                    <span class="data-value"><b id="sitioExtSolar">---</b> <i>W/m²</i></span>
+                </div>
+
+            </div>
+
+            <div id="sitioExtTimestamp" class="timestamp">
+                --/--- --:--
+            </div>
+
+        </section>
+
+
+        <!-- ==================== INTERNO ==================== -->
+        <section class="section interno">
+
+            <div class="section-title">Interno</div>
+
+            <div class="temp">
+                <span id="sitioIntTemp">--.-</span>
+                <span class="unit">°C</span>
+            </div>
+
+            <div class="data-grid">
+
+                <div class="data-line">
+                    <span class="data-label">Umidade relativa do ar</span>
+                    <span class="data-value"><b id="sitioIntHumid">--.-</b> <i>%</i></span>
+                </div>
+
+            </div>
+
+            <div id="sitioIntTimestamp" class="timestamp">
+                --/--- --:--
+            </div>
+
+        </section>
+
+    </div>
+
+
+    <!-- ==================== RODAPÉ ==================== -->
+    <div class="last-update-row">
+
+        <div
+            id="lastUpdate"
+            class="last-update">
+            Dados: --/--- --:--
+        </div>
+
+        <button
+            id="refreshButton"
+            class="refresh-button"
+            title="Atualizar">
+            ↻
+        </button>
+
+    </div>
+
+</div>

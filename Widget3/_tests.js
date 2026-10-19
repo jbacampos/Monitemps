@@ -284,20 +284,49 @@ check("dias chuvosos: reset -> total de dias", sUnc2.totalDays, 3);
 check("dias chuvosos: reset -> chuvosos", sUnc2.rainyDays, 1);
 
 // (h) Rótulo do total: dias inteiros x período com dias parciais.
-check("dias período: ontem (1 dia inteiro)",
+check("dias observados: ontem (1 dia inteiro)",
     formatPeriodDays(countCalendarUnits(S("2026-10-06T03:00:00Z"),
-        S("2026-10-07T03:00:00Z"))), "(1 dia)");
-check("dias período: setembro inteiro (30 dias)",
+        S("2026-10-07T03:00:00Z"))), "(1 dia observado)");
+check("dias observados: setembro inteiro (30 dias)",
     formatPeriodDays(countCalendarUnits(S("2026-09-01T03:00:00Z"),
-        S("2026-10-01T03:00:00Z"))), "(30 dias)");
-check("dias período: últimas 24h -> parcial",
-    formatPeriodDays(countCalendarUnits(NOW - 24 * H, NOW)), "(≈2 dias)");
-check("dias período: fim em 'agora' -> parcial",
+        S("2026-10-01T03:00:00Z"))), "(30 dias observados)");
+check("dias observados: últimas 24h -> parcial",
+    formatPeriodDays(countCalendarUnits(NOW - 24 * H, NOW)),
+    "(≈2 dias observados)");
+check("dias observados: fim em 'agora' -> parcial",
     formatPeriodDays(countCalendarUnits(S("2026-10-01T03:00:00Z"), NOW)),
-    "(≈7 dias)");
-check("dias período: início no meio do dia -> parcial",
+    "(≈7 dias observados)");
+check("dias observados: início no meio do dia -> parcial",
     formatPeriodDays(countCalendarUnits(S("2026-10-01T15:00:00Z"),
-        S("2026-10-04T03:00:00Z"))), "(≈3 dias)");
+        S("2026-10-04T03:00:00Z"))), "(≈3 dias observados)");
+
+// (i) Contagem a partir do dia da 1ª coleta (quando ela caiu no período).
+var oF = S("2026-09-14T20:33:00Z");            // 1ª coleta = 14/09 17:33 -03
+check("dias observados: 1ª coleta dentro do período",
+    observedPeriodDays(S("2026-01-01T03:00:00Z"), S("2026-10-01T03:00:00Z"), oF),
+    { days: 17, wholeDays: true });
+check("dias observados: 1ª coleta anterior ao período",
+    observedPeriodDays(S("2026-10-01T03:00:00Z"), S("2026-10-03T03:00:00Z"), oF),
+    { days: 2, wholeDays: true });
+check("dias observados: sem 1ª coleta conhecida",
+    observedPeriodDays(S("2026-10-01T03:00:00Z"), S("2026-10-04T03:00:00Z"), null),
+    { days: 3, wholeDays: true });
+check("dias observados: 1ª coleta dentro e fim em 'agora'",
+    observedPeriodDays(S("2026-01-01T03:00:00Z"), NOW, oF),
+    { days: 24, wholeDays: false });
+check("dias observados: rótulo com ≈ quando o fim é parcial",
+    formatPeriodDays(observedPeriodDays(S("2026-01-01T03:00:00Z"), NOW, oF)),
+    "(≈24 dias observados)");
+
+// (j) Período inteiramente anterior à 1ª coleta (ex.: "Ano passado").
+var ap0 = S("2025-01-01T03:00:00Z");
+var ap1 = S("2026-01-01T03:00:00Z");
+check("dias observados: 1ª coleta POSTERIOR ao período -> 0",
+    observedPeriodDays(ap0, ap1, oF), { days: 0, wholeDays: true });
+check("dias observados: rótulo de 0 dias",
+    formatPeriodDays(observedPeriodDays(ap0, ap1, oF)), "(0 dias observados)");
+check("dias observados: ano anterior + ano retrasado -> 0",
+    observedPeriodDays(S("2024-01-01T03:00:00Z"), ap0, oF).days, 0);
 
 // ------------------------------------------------------------
 // 5) RANKINGS (dias / semanas / meses) e condicionamento

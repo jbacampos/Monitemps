@@ -1,0 +1,284 @@
+/* ============================================================
+   WIDGET 1 — SÍTIO
+   Base visual do widget original: fundo, cores, fontes e títulos.
+   Dados do Sítio em verde (#9bc53d).
+   ============================================================ */
+
+.card {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    padding: 12px 18px 8px 18px;
+    background: #292c32;
+    color: #eeeeee;
+    font-family: Inter, Arial, sans-serif;
+    overflow: hidden;
+}
+
+/* Título da localidade: mesmo tamanho do título de seção do
+   Widget 2 (VENTO). */
+.location-title {
+    width: 100%;
+    text-align: center;
+    font-size: 22px;
+    line-height: 26px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #eeeeee;
+    margin-bottom: 8px;
+}
+
+/* ------------------------------------------------------------
+   Externo e Interno lado a lado, com divisor vertical.
+   ------------------------------------------------------------ */
+
+.sections {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: stretch;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.section {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.section.externo {
+    padding-right: 14px;
+}
+
+.section.interno {
+    border-left: 1px solid #555960;
+    padding-left: 14px;
+}
+
+.section-title {
+    text-align: center;
+    font-size: 22px;
+    line-height: 26px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #c5cbd4;
+    margin-bottom: 10px;
+}
+
+.temp {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    line-height: 1;
+    font-size: 43px;
+    font-weight: 500;
+    margin-bottom: 14px;
+}
+
+.temp .unit {
+    font-size: 15px;
+    font-weight: 400;
+    margin-left: 5px;
+    color: inherit;
+}
+
+.sitio .temp {
+    color: #9bc53d;
+}
+
+/* ------------------------------------------------------------
+   Duas colunas dentro de cada seção: títulos alinhados à
+   esquerda e valores alinhados à direita da coluna.
+   ------------------------------------------------------------ */
+
+.data-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 10px;
+    row-gap: 6px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.data-line {
+    display: contents;
+}
+
+.data-label {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 400;
+    color: #eeeeee;
+    text-align: left;
+    white-space: normal;
+}
+
+.data-value {
+    font-size: 14px;
+    line-height: 20px;
+    font-weight: 400;
+    color: #eeeeee;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.sitio .data-value b,
+.sitio .data-value i {
+    color: #9bc53d;
+}
+
+.data-value b {
+    font-weight: 400;
+}
+
+.data-value i {
+    font-style: normal;
+    font-weight: 400;
+}
+
+.timestamp {
+    width: 100%;
+    text-align: center;
+    margin-top: 9px;
+    font-size: 11px;
+    line-height: 14px;
+    color: #cc7a00;
+    visibility: hidden;
+}
+
+.timestamp.visible {
+    visibility: visible;
+}
+
+/* ------------------------------------------------------------
+   Rodapé
+   ------------------------------------------------------------ */
+
+.last-update-row {
+    position: absolute;
+    left: 18px;
+    right: 18px;
+    bottom: 8px;
+    height: 25px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.last-update {
+    text-align: center;
+    font-size: 11px;
+    line-height: 14px;
+    color: #8b929c;
+    white-space: nowrap;
+}
+
+.last-update.atrasado {
+    color: #ff4d4d;
+}
+
+.refresh-button {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    color: #aeb4bb;
+    font-family: Arial, sans-serif;
+    font-size: 23px;
+    font-weight: 400;
+    line-height: 28px;
+    cursor: pointer;
+    text-align: center;
+}
+
+.refresh-button:hover {
+    color: #eeeeee;
+}
+
+
+/* ============================================================
+   AJUSTES EXCLUSIVOS PARA MOBILE (CELULAR)
+   ============================================================ */
+
+@media only screen and (max-width: 480px) {
+
+    .card {
+        padding: 7px 10px 5px 10px;
+    }
+
+    .location-title {
+        font-size: 20px;
+        line-height: 23px;
+        letter-spacing: 1.8px;
+        margin-bottom: 6px;
+    }
+
+    .section.externo {
+        padding-right: 8px;
+    }
+
+    .section.interno {
+        padding-left: 8px;
+    }
+
+    .section-title {
+        font-size: 20px;
+        line-height: 23px;
+        letter-spacing: 1.8px;
+        margin-bottom: 6px;
+    }
+
+    .temp {
+        font-size: 36px;
+        margin-bottom: 10px;
+    }
+
+    .temp .unit {
+        font-size: 13px;
+        margin-left: 3px;
+    }
+
+    .data-grid {
+        column-gap: 6px;
+        row-gap: 3px;
+    }
+
+    .data-label,
+    .data-value {
+        font-size: 12px;
+        line-height: 16px;
+    }
+
+    .timestamp {
+        margin-top: 5px;
+        font-size: 9px;
+        line-height: 11px;
+    }
+
+    .last-update-row {
+        left: 8px;
+        right: 8px;
+        bottom: 4px;
+        height: 22px;
+    }
+
+    .last-update {
+        font-size: 9px;
+        line-height: 11px;
+    }
+
+    .refresh-button {
+        width: 24px;
+        height: 24px;
+        font-size: 20px;
+        line-height: 24px;
+    }
+}
